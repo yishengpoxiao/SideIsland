@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <RestorePackagesPath>$(MSBuildThisFileDirectory)..\.runtime\nuget-cross</RestorePackagesPath>
+    <!-- The repository VERSION is shared with the Windows release scripts.
+         macOS/Linux platform readiness remains preview regardless of this tag. -->
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../VERSION').Trim())</Version>
+  </PropertyGroup>
+</Project>

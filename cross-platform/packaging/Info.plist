@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleIdentifier</key><string>dev.sideisland.preview</string>
+  <key>CFBundleName</key><string>Side Island</string>
+  <key>CFBundleDisplayName</key><string>Side Island Preview</string>
+  <key>CFBundleExecutable</key><string>SideIsland.Desktop</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key><string>1.0.0</string>
+  <key>SideIslandPreviewVersion</key><string>1.0.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSRequiresAquaSystemAppearance</key><false/>
+  <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Only after you explicitly connect Apple Music, Side Island sends Apple Events to read its track metadata and control playback. You may deny access and keep using other tools. 仅在你明确连接 Apple Music 后，灵动岛才会发送 Apple Events 读取歌曲信息和控制播放；拒绝授权仍可使用其他工具。</string>
+</dict>
+</plist>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><Nullable>disable</Nullable><NoWarn>$(NoWarn);CS8618;CS8600;CS8601;CS8602;CS8603;CS8604;CS8625;SYSLIB0045</NoWarn></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Shared/Calculator.cs" Link="Shared/Calculator.cs"/>
+    <Compile Include="../../src/Shared/FocusTimer.cs" Link="Shared/FocusTimer.cs"/>
+    <Compile Include="../../src/Shared/TextDiff.cs" Link="Shared/TextDiff.cs"/>
+    <Compile Include="../../src/Shared/TextTools.cs" Link="Shared/TextTools.cs"/>
+    <Compile Include="../../src/Shared/TimeTools.cs" Link="Shared/TimeTools.cs"/>
+    <Compile Include="../../src/Shared/ConversionTools.cs" Link="Shared/ConversionTools.cs"/>
+    <Compile Include="../../src/Shared/FileHashTools.cs" Link="Shared/FileHashTools.cs"/>
+    <Compile Include="../../src/Shared/TaskActivityHub.cs" Link="Shared/TaskActivityHub.cs"/>
+    <Compile Include="../../src/Shared/TaskActivityApi.cs" Link="Shared/TaskActivityApi.cs"/>
+    <Compile Include="../../src/Shared/RandomTools.cs" Link="Shared/RandomTools.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorBitArrayExtensions.cs" Link="ThirdParty/QrCodeGenerator/QrVendorBitArrayExtensions.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorDataTooLongException.cs" Link="ThirdParty/QrCodeGenerator/QrVendorDataTooLongException.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorObjects.cs" Link="ThirdParty/QrCodeGenerator/QrVendorObjects.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorQrSegment.cs" Link="ThirdParty/QrCodeGenerator/QrVendorQrSegment.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorReedSolomonGenerator.cs" Link="ThirdParty/QrCodeGenerator/QrVendorReedSolomonGenerator.cs"/>
+    <Compile Include="../../src/ThirdParty/QrCodeGenerator/QrVendorQrCode.cs" Link="ThirdParty/QrCodeGenerator/QrVendorQrCode.cs"/>
+  </ItemGroup>
+</Project>

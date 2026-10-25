@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>SideIsland.Tests</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../SideIsland.Core/SideIsland.Core.csproj"/><ProjectReference Include="../SideIsland.Desktop/SideIsland.Desktop.csproj"/><PackageReference Include="Avalonia.Headless" Version="12.1.4"/></ItemGroup>
+</Project>

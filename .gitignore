@@ -1,0 +1,37 @@
+# Local dependencies and generated builds
+/.runtime/
+/dist/
+/build/
+/release/
+/packaging/app/
+**/bin/
+**/obj/
+/cross-platform/out/
+
+# Local diagnostics may contain desktop images, paths and message contents
+/artifacts/
+*.dmp
+*.etl
+*.log
+*.jsonl
+*.pdb
+*.exe
+*.dll
+*.msix
+*.appx
+*.zip
+
+# Credentials, signing material and user settings are never repository content
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+*.pem
+*.user
+*.suo
+.vs/
+.idea/
+.DS_Store
+Thumbs.db

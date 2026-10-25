@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Side Island Preview
+Name[zh_CN]=Side Island 灵动岛预览版
+GenericName=Desktop island
+Comment=Compact desktop tools, status and media controls
+Comment[zh_CN]=紧凑桌面工具、状态和媒体控制
+Exec=side-island
+TryExec=side-island
+Icon=applications-utilities
+Terminal=false
+StartupNotify=false
+StartupWMClass=SideIsland.Desktop
+Categories=Utility;Development;

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>SideIsland.Desktop</AssemblyName><ApplicationManifest>app.manifest</ApplicationManifest><BuiltInComInteropSupport>true</BuiltInComInteropSupport></PropertyGroup>
+  <ItemGroup>
+    <Content Include="../licenses/**/*" Link="licenses/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <ProjectReference Include="../SideIsland.Core/SideIsland.Core.csproj"/>
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4"/>
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4"/>
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4"/>
+    <PackageReference Include="Avalonia.Markup.Xaml.Loader" Version="12.1.4"/>
+  </ItemGroup>
+</Project>

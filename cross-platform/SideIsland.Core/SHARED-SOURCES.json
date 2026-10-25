@@ -1,0 +1,12 @@
+{
+  "QrOriginalSourceSHA256": "2147D83EAC0194A95D34BDA481989642B66AF2C77358387E2402E9636FC1DA00",
+  "QrSourcePath": "src/ThirdParty/QrCodeGenerator/QrVendorQrCode.cs",
+  "QrSourceSHA256": "67A06F389D6FBFAE42985DA82B51BC49F246DECD3232841C50D7282B74EEA81C",
+  "QrChange": "One linked source for Windows and .NET 10. NET10_0_OR_GREATER excludes only System.Drawing imports and the Windows bitmap exporter; encoder, SVG exporter and original license are unchanged. The duplicate QrPortable.cs was removed after a local diagnostic backup.",
+  "CodexSourceSHA256": "5E815789710996AC1BC5BF4DC9AA1862199D54D674B0394B731085E94C57A137",
+  "CodexChange": "Unix executable discovery and standard Apple Silicon Homebrew locations; transport unchanged.",
+  "RandomOriginalSourceSHA256": "6AE5724FB8D953A04F6DC6A240C535048438F600956C26CC62376C3A4DED4232",
+  "RandomSourcePath": "src/Shared/RandomTools.cs",
+  "RandomSourceSHA256": "EA113243861E93C5C931F0041597E999767761582CA632FD5F8B3CA3BB3EB128",
+  "RandomChange": "One linked source uses RandomNumberGenerator.Create on .NET Framework 4.8 and .NET 10. Rejection sampling and all tool rules are unchanged. The duplicate RandomToolsPortable.cs was removed after a local diagnostic backup."
+}

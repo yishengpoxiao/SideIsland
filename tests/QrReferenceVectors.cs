@@ -1,0 +1,53 @@
+// Reference matrices from manuelbl/QrCodeGenerator v1.6.0 QrCodeTest.cs. MIT; see THIRD-PARTY-NOTICES.txt.
+namespace CodexIsland { internal static class QrReferenceVectors {
+internal static readonly string[] Modules0 = {
+            "XXXXXXX  X    XXXXXXX",
+            "X     X XX  X X     X",
+            "X XXX X     X X XXX X",
+            "X XXX X  XX X X XXX X",
+            "X XXX X  X    X XXX X",
+            "X     X XXXX  X     X",
+            "XXXXXXX X X X XXXXXXX",
+            "        X   X        ",
+            "    XXXX   XX XX   X ",
+            " X  XX  XX XXX X  X  ",
+            " XXX  XX    XXXXXXXX ",
+            "X  X X X X X X  X XX ",
+            "X   XXXX  XX         ",
+            "        X X  XX   X  ",
+            "XXXXXXX X     X  X X ",
+            "X     X XXXXXXXX X X ",
+            "X XXX X XX XXX XX XXX",
+            "X XXX X  XXXX  X X XX",
+            "X XXX X  X  X  XXXX  ",
+            "X     X    X  X X XX ",
+            "XXXXXXX  X X X    XXX"
+        };
+internal static readonly string[] Modules3 = {
+            "XXXXXXX X  X XXXX XXXXXXX",
+            "X     X   X X   X X     X",
+            "X XXX X X X X XXX X XXX X",
+            "X XXX X X X XX XX X XXX X",
+            "X XXX X  X  X X   X XXX X",
+            "X     X X  XX   X X     X",
+            "XXXXXXX X X X X X XXXXXXX",
+            "        X  X X           ",
+            " X X XXXX  XX XX XXX XX X",
+            "XXX X   XX   X X X  XXX  ",
+            " X X  XXXX  XXXX  XXX    ",
+            " X  X    XX XX X XXXXXXXX",
+            "   XXXXX X XX X       XX ",
+            " X  XX X   X XX  XX  XX  ",
+            "X XX XX XXX  X XXX    XX ",
+            " X X X XX XXX XX    XX X ",
+            "XX  X X X  XXXX XXXXX X X",
+            "        XX  XX XX   XX XX",
+            "XXXXXXX XXX  X XX X X XX ",
+            "X     X X XX XXXX   X  XX",
+            "X XXX X  XXXX X XXXXX  XX",
+            "X XXX X X XX XX   XXXX   ",
+            "X XXX X    XXX    XX  X X",
+            "X     X X  X  X X  X XX  ",
+            "XXXXXXX  X   X   X  X XXX"
+        };
+} }

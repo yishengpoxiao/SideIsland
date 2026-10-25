@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+         xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap3 uap7 rescap">
+  <Identity Name="CodexIsland.Notifications" Publisher="CN=CodexIsland" Version="1.0.0.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Side Island</DisplayName>
+    <PublisherDisplayName>Side Island</PublisherDisplayName>
+    <Logo>NotificationAssets\StoreLogo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="zh-cn" />
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Applications>
+    <Application Id="Island" Executable="CodexIsland.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Side Island" Description="Side island for local notifications and status"
+                          BackgroundColor="transparent"
+                          Square150x150Logo="NotificationAssets\Square150x150Logo.png"
+                          Square44x44Logo="NotificationAssets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <uap3:Capability Name="userNotificationListener" />
+    <uap7:Capability Name="globalMediaControl" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

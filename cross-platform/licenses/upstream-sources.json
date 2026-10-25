@@ -1,0 +1,17 @@
+[
+  {
+    "Source": "https://raw.githubusercontent.com/AvaloniaUI/Avalonia/2d79ba55fae1b1e71c69f93a668080c9029e6a31/licence.md",
+    "SHA256": "213814D306090074D234D760239FF0F67EB9B8D20EEFB4D5631BB39DBE0B769B",
+    "File": "Avalonia-MIT.txt"
+  },
+  {
+    "Source": "https://raw.githubusercontent.com/rsms/inter/master/LICENSE.txt",
+    "SHA256": "262481E844521B326F5ECD053E59B98C8B2DA78C8EE1BDBB6E8174305E54935A",
+    "File": "Inter-OFL.txt"
+  },
+  {
+    "Source": "https://raw.githubusercontent.com/tmds/Tmds.DBus/b4a7fed0b878f74cb54f7cca84d2889af4e596ba/COPYING",
+    "SHA256": "ACA3B49277ABCC7886CCB2F115603A9F5B15FC3F96019A10C00F2974098B210C",
+    "File": "Tmds.DBus-MIT.txt"
+  }
+]
