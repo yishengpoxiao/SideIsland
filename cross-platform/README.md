@@ -8,6 +8,8 @@ English | [简体中文](README.zh-CN.md)
 
 **Data status** provides explicit retry, draft backup/reload and damaged-file recovery for preferences and notifications. External edits are detected, and failed saves keep the in-memory draft. See [local data and recovery](docs/DATA-RECOVERY.md).
 
+**File checksums** includes a compact [batch mode](docs/BATCH-CHECKSUMS.md) with per-file verification, cancellation that retains completed results and combined manifest export. **Text comparison** supports [background patch export](docs/PATCH-EXPORT.md), with explicit confirmation before replacing an observed existing file.
+
 The current development interface provides 24 entries: focus, music, Codex usage, ports, log watch, notes, clipboard, text comparison, text tools, QR transfer, calculator, random tools, checksums, screenshot pins, batch files, batch images, notifications, workspaces, task watch, keep awake, system volume, task activities, data status and settings. The published v1.0.0 preview has 21 entries; new work is described in [Unreleased](../docs/UNRELEASED.md). English/Chinese switching and light/dark themes are available. This is a port in progress, with a smaller scope than the Windows edition; see [porting status](docs/PORTING-STATUS.md).
 
 - **Notifications:** app exclusions, priority, repeat merging, search, unread management and optional local history. Mac reads only accessible visible notification cards after explicit Accessibility opt-in. Ubuntu monitors new session D-Bus `Notify` calls when permitted. A token-protected local HTTP input is off by default. It does not replace the system notification service or promise hidden message history. [Details](docs/NOTIFICATIONS.md).

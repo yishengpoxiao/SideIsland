@@ -63,6 +63,8 @@ Optional integrations use `playerctl` for MPRIS media, `pactl` for PulseAudio/Pi
 
 Tool availability, limits and detailed interactions are covered in the [Windows guide](docs/windows-guide.zh-CN.md). Its older development version labels are retained as historical context; the public release is **v1.0.0**.
 
+The development branch adds [batch checksums](cross-platform/docs/BATCH-CHECKSUMS.md) on Windows and the portable preview, plus [safer background patch export](cross-platform/docs/PATCH-EXPORT.md) in the preview. These changes are source updates after v1.0.0; published release archives have not been replaced.
+
 Real Windows playback/control and artwork testing has covered QQ Music, NetEase Cloud Music and Apple Music. Cider was not installed and is **not claimed as tested**. Metadata, progress, controls and lyrics depend on what the player provides; unavailable progress is not fabricated.
 
 ## Platform differences

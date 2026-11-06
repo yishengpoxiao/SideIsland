@@ -12,6 +12,8 @@
 
 跨平台核心包含计时、文本／差异／计算／单位与随机工具、文件校验、二维码编码、任务状态和几何停靠策略。具体实现及限制见 [移植状态](docs/PORTING-STATUS.md)。
 
+**文件校验**新增紧凑的[批量模式](docs/BATCH-CHECKSUMS.md#简体中文)，支持逐项校验、取消后保留完成结果、合并清单导出；**文字对照**支持[后台导出补丁](docs/PATCH-EXPORT.md#简体中文)，替换已有文件前明确确认所观测的版本。
+
 ## Mac：刘海优先
 
 安装包最低要求 macOS 15.0，并遵守 [.NET 10 的系统支持政策](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)。2026-09-28 更新的支持表列出 macOS 15、26、27；Avalonia 的更低部署门槛不改变运行时支持范围。目标设备验证仍待完成。

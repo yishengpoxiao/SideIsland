@@ -63,6 +63,8 @@ v1.0.0 之后的开发改动新增跨平台数据恢复、工作场景、日志�
 
 详细操作和容量限制见 [Windows 完整指南](docs/windows-guide.zh-CN.md)。其中旧开发版本编号作为历史记录保留，当前公开发行版本为 **v1.0.0**。
 
+开发分支新增 Windows 与跨平台预览版的[批量文件校验](cross-platform/docs/BATCH-CHECKSUMS.md#简体中文)，以及预览版的[安全后台补丁导出](cross-platform/docs/PATCH-EXPORT.md#简体中文)。这些属于 v1.0.0 之后的源码更新，已发布安装包未替换。
+
 QQ 音乐、网易云音乐和 Apple Music 已进行真实 Windows 播放控制与封面测试；Cider 当时未安装，**未宣称实测通过**。歌名、进度、控制和歌词取决于播放器提供的信息，未提供的进度不会伪造显示。
 
 ## 跨平台能力差异
