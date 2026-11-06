@@ -112,6 +112,7 @@ namespace CodexIsland
                 new TestSuite("TimeToolsTests", () => TimeToolsTests.Run()),
                 new TestSuite("RandomToolsTests", () => RandomToolsTests.Run()),
                 new TestSuite("FileHashTests", () => FileHashTests.Run()),
+                new TestSuite("BatchHashPanelTests", () => BatchHashPanelTests.Run()),
                 new TestSuite("SystemUtilityTests", () => SystemUtilityTests.Run()),
                 new TestSuite("ImageQuickTests", () => ImageQuickTests.Run()),
                 new TestSuite("ScreenPinTests", () => ScreenPinTests.Run()),

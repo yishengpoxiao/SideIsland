@@ -24,6 +24,12 @@ namespace CodexIsland
         private bool disposed, busy, exporting;
         private int revision;
         private CancellationTokenSource pending;
+        private static int activeRead;
+        private readonly StackPanel singleContent = new StackPanel();
+        private readonly BatchHashPanel batchContent;
+        private readonly Button singleMode, batchMode;
+        internal static bool TryBeginRead() { return Interlocked.CompareExchange(ref activeRead, 1, 0) == 0; }
+        internal static void EndRead() { Interlocked.Exchange(ref activeRead, 0); }
         private sealed class HashExportSnapshot
         {
             internal readonly string SelectedPath, SourcePath, Algorithm, Digest, Manifest;
@@ -57,12 +63,16 @@ namespace CodexIsland
             algorithm.SelectionChanged += (s, e) => { InvalidateResult(); UpdateControls(); };
             expected.TextChanged += (s, e) => Compare();
             AllowDrop = true;
-            PreviewDragOver += (s, e) => { e.Effects = !busy && !demo && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Link : DragDropEffects.None; e.Handled = true; };
+            PreviewDragOver += (s, e) => { e.Effects = !busy && !batchContent.IsBusy && !demo && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Link : DragDropEffects.None; e.Handled = true; };
             PreviewDrop += (s, e) => {
                 e.Handled = true; if (busy || demo) return;
-                try { var paths = e.Data.GetData(DataFormats.FileDrop) as string[]; if (paths == null || paths.Length != 1) { status.Text = "请每次拖入一个文件。"; return; } SetFile(paths[0]); }
+                try { var paths = e.Data.GetData(DataFormats.FileDrop) as string[]; if (paths == null || paths.Length == 0) return; if (paths.Length > 1 || batchContent.Visibility == Visibility.Visible) { ShowBatch(true); batchContent.AcceptFiles(paths); } else SetFile(paths[0]); }
                 catch { status.Text = "无法读取此次拖放，请使用选择文件。"; }
             };
+            var existing = new UIElement[Children.Count]; Children.CopyTo(existing, 0); Children.Clear(); foreach (var child in existing) singleContent.Children.Add(child);
+            batchContent = new BatchHashPanel(demo, selectManifestPath, writeClipboard, writeManifest) { Visibility = Visibility.Collapsed };
+            singleMode = IslandWindow.Button("单个文件", () => ShowBatch(false)); batchMode = IslandWindow.Button("批量校验", () => ShowBatch(true));
+            var modes = PanelActionLayout.Create(2, singleMode, batchMode); modes.Margin = new Thickness(0, 0, 0, 8); Children.Add(modes); Children.Add(singleContent); Children.Add(batchContent); singleMode.IsEnabled = false;
             UpdateControls();
         }
         private string Algorithm { get { return algorithm.SelectedIndex == 1 ? "SHA512" : "SHA256"; } }
@@ -72,12 +82,20 @@ namespace CodexIsland
             var dialog = new Microsoft.Win32.OpenFileDialog { Title = UiLocalization.Localize("选择要校验的文件"), CheckFileExists = true, Filter = UiLocalization.FileFilter("所有文件|*.*"), Multiselect = false };
             if (dialog.ShowDialog(Window.GetWindow(this)) == true) SetFile(dialog.FileName);
         }
-        internal void AcceptExternalFile(string value) { if (!busy && !disposed && !demo) SetFile(value); }
+        internal void AcceptExternalFile(string value) { if (!busy && !disposed && !demo) { ShowBatch(false); SetFile(value); } }
+        internal void ShowBatch(bool value)
+        {
+            if (disposed) return;
+            if (value && busy) Cancel(); if (!value) batchContent.Cancel();
+            singleContent.Visibility = value ? Visibility.Collapsed : Visibility.Visible; batchContent.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+            singleMode.IsEnabled = value; batchMode.IsEnabled = !value;
+        }
         private void SetFile(string value) { path = value; file.Text = value; InvalidateResult(); status.Text = "文件已选择，点击开始计算。"; UpdateControls(); }
         private void InvalidateResult() { result = null; completed = null; output.Clear(); progress.Value = 0; status.Text = ""; Compare(); }
         internal async Task Calculate()
         {
             if (busy || disposed || (!demo && String.IsNullOrEmpty(path))) return;
+            if (!TryBeginRead()) { status.Text = "上一次文件读取尚未结束，请稍后重试。"; return; }
             busy = true; InvalidateResult(); int current = ++revision; string selected = Algorithm, selectedPath = path;
             var source = new CancellationTokenSource(); pending = source;
             var updates = new Progress<int>(value => { if (!disposed && current == revision && busy) { progress.Value = value; status.Text = "正在计算… " + value + "%"; } });
@@ -98,7 +116,7 @@ namespace CodexIsland
             }
             catch (OperationCanceledException) { if (!disposed && current == revision) status.Text = "已取消计算，可以重新开始。"; }
             catch (Exception error) { if (!disposed && current == revision) status.Text = error is UnauthorizedAccessException ? "无法读取文件：请检查权限或是否选择了文件夹。" : error is IOException ? "无法读取文件：可能已移动、被占用或设备暂不可用。" : "计算失败，请重新选择文件后再试。"; }
-            finally { source.Dispose(); if (ReferenceEquals(pending, source)) pending = null; busy = false; if (!disposed) UpdateControls(); }
+            finally { source.Dispose(); if (ReferenceEquals(pending, source)) pending = null; busy = false; EndRead(); if (!disposed) UpdateControls(); }
         }
         private void Cancel() { if (pending != null) { pending.Cancel(); status.Text = "正在取消…"; cancel.IsEnabled = false; } }
         private void Compare()
@@ -157,6 +175,6 @@ namespace CodexIsland
             finally { exporting = false; if (!disposed) UpdateControls(); }
         }
         private void UpdateControls() { choose.IsEnabled = algorithm.IsEnabled = !busy && !disposed; calculate.IsEnabled = !disposed && !busy && (demo || !String.IsNullOrEmpty(path)); cancel.IsEnabled = !disposed && busy; copy.IsEnabled = !disposed && !busy && !exporting && result != null; copyManifest.IsEnabled = saveManifest.IsEnabled = !exporting && Current(completed) && completed.Manifest != null; progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed; }
-        public void Dispose() { disposed = true; revision++; if (pending != null) pending.Cancel(); UpdateControls(); }
+        public void Dispose() { disposed = true; revision++; if (pending != null) pending.Cancel(); batchContent.Dispose(); UpdateControls(); }
     }
 }

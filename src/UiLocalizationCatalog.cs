@@ -970,6 +970,7 @@ H · 最高纠错（1,272 字节）|H · Highest correction (1,272 bytes)
             AnnotationBatchCatalog();
             NextFeatureCatalog();
             PortsCatalog();
+            BatchHashCatalog();
         }
         private static void BuildUnits()
         {
