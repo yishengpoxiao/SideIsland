@@ -24,14 +24,14 @@ internal static class LayoutTests
             foreach (int width in new[] { 320, 480, 760 }) foreach (int height in new[] { 360, 720 })
             foreach (double scale in new[] { 1d, 1.25, 1.5, 2 })
             {
-                var window = new IslandWindow(true, folder); window.Settings.Language = language; window.Settings.LightTheme = light; window.Settings.ExpandedWidth = width; window.Settings.ExpandedHeight = height;
-                window.RequestedThemeVariant = light ? ThemeVariant.Light : ThemeVariant.Dark;
+                var window = new IslandWindow(true, folder); window.Settings.ExpandedWidth = width; window.Settings.ExpandedHeight = height;
                 window.SetRenderScaling(scale);
-                window.Show(); window.Expand();
+                window.Show(); window.Expand(); AppearanceTestActions.Set(window, language, light);
                 foreach (var tool in IslandWindow.Tools)
                 {
                     window.SelectToolForTest(tool.Id); window.Width = width; window.Height = height;
                     Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
+                    AppearanceTestActions.Assert(window, language, light);
                     var context = $"{language}/{light}/{width}x{height}/{scale}/{tool.Id}";
                     if (Math.Abs(window.RenderScaling - scale) > .001) issues.Add(context + " requested scaling not applied");
                     if (!window.IsVisible || window.Bounds.Width <= 0) issues.Add(context + " invalid window");

@@ -14,7 +14,7 @@ internal static class DiffToolTests
         var window = new IslandWindow(true, directory);
         try
         {
-            window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("diff"); Flush(window);
+            window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("diff"); Flush(window);
             var left = Find<TextBox>(window, "diff-left"); var right = Find<TextBox>(window, "diff-right");
             var compare = Find<Button>(window, "diff-compare"); var copy = Find<Button>(window, "diff-copy"); var save = Find<Button>(window, "diff-save"); var state = Find<TextBlock>(window, "diff-status");
             Check(!copy.IsEnabled && !save.IsEnabled, "no export exists before comparison");

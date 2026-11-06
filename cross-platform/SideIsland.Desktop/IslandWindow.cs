@@ -256,7 +256,7 @@ public sealed partial class IslandWindow : Window
         if (Interlocked.Exchange(ref tasksDirty, 0) != 0 && expanded && selected == "activities") RenderTaskRows();
         if (Interlocked.Exchange(ref notificationDirty, 0) != 0 && expanded && page == "messages") RefreshNotificationRows();
         PollWatches();
-        if (!testMode && awakeUntil > DateTime.UtcNow && !platform.IsAwake) { awakeUntil = default; if (platform.AwakeError is { } error) Report(error); }
+        PollAwakeState();
         if (!testMode && prefs.MediaEnabled && DateTime.UtcNow >= nextMedia && !readingMedia) { nextMedia = DateTime.UtcNow.AddSeconds(2); _ = ReadMedia(); }
         if (!testMode && prefs.CodexEnabled && DateTime.UtcNow >= nextQuota && !readingQuota) { nextQuota = DateTime.UtcNow.AddSeconds(60); _ = ReadQuota(); }
         await Task.CompletedTask;

@@ -24,6 +24,7 @@ namespace CodexIsland
             Check(!FileHashTools.TryNormalizeExpected(new string('x', 64), "SHA256", out expected), "reject nonhex");
             Check(!FileHashTools.TryNormalizeExpected(new string('a', 128), "SHA256", out expected), "reject wrong algorithm length");
             ManifestTests();
+            FileHashExportTests.Run();
             string path = Path.Combine(Path.GetTempPath(), "island-hash-" + Guid.NewGuid().ToString("N") + ".bin");
             try
             {
@@ -63,7 +64,7 @@ namespace CodexIsland
             Check(FileHashTools.TryResolveExpected("SHA512 (app.zip) = " + sha512, "SHA512", "app.zip", out expected, out error) && expected == sha512, "BSD SHA512 list");
             Check(!FileHashTools.TryResolveExpected("SHA512 (app.zip) = " + sha512, "SHA256", "app.zip", out expected, out error) && error == "manifest", "wrong selected algorithm rejected");
             Check(!FileHashTools.TryResolveExpected(digest + "  app.zip\nmalformed", "SHA256", "app.zip", out expected, out error) && expected == null && error == "manifest", "malformed later rows cannot be ignored after a match");
-            Check(!FileHashTools.TryResolveExpected("\\" + digest + "  odd\\nname", "SHA256", "odd\\nname", out expected, out error) && error == "manifest", "unsupported escaped GNU filenames are rejected");
+            Check(FileHashTools.TryResolveExpected("\\" + digest + "  odd\\nname", "SHA256", "odd\nname", out expected, out error) && expected == digest, "escaped GNU newline filename is decoded exactly");
             Check(!FileHashTools.TryResolveExpected(new string('x', FileHashTools.MaximumManifestLength + 1), "SHA256", "app.zip", out expected, out error) && error == "too-large", "manifest character bound");
             Check(!FileHashTools.TryResolveExpected(String.Join("\n", Enumerable.Repeat("# comment", 1025)), "SHA256", "app.zip", out expected, out error) && error == "too-large", "manifest line bound");
             Check(!FileHashTools.TryResolveExpected(digest + "  app.zip ", "SHA256", "app.zip", out expected, out error) && error == "file-missing", "significant trailing filename space cannot match a different file");
@@ -174,6 +175,10 @@ namespace CodexIsland
                         Check(expected.Text == content && expected.AcceptsReturn && expected.MaxLength == 0, "appearance changes preserve full untruncated manifest");
                         Check(expected.ActualHeight <= 103 && expected.ExtentHeight > expected.ViewportHeight, "multiline manifest stays compact and scrolls");
                         Check(comparison.Text == UiLocalization.Localize("清单中存在同名文件或冲突校验值，请仅保留目标记录。"), "conflict status follows live language selection");
+                        var copyManifest = Field<Button>(panel, "copyManifest"); var saveManifest = Field<Button>(panel, "saveManifest");
+                        Check(Convert.ToString(copyManifest.Content) == UiLocalization.Localize("复制清单") && Convert.ToString(saveManifest.Content) == UiLocalization.Localize("另存清单"), "export captions follow live language selection");
+                        Check(Math.Abs(copyManifest.ActualWidth - saveManifest.ActualWidth) < 1 && Math.Abs(copyManifest.ActualHeight - saveManifest.ActualHeight) < 1 && Math.Abs(copyManifest.TranslatePoint(new Point(), panel).Y - saveManifest.TranslatePoint(new Point(), panel).Y) < 1, "export actions have equal sizes and aligned baseline in every compact layout");
+                        CheckCaption(copyManifest); CheckCaption(saveManifest);
                         var formatted = new FormattedText(comparison.Text, UiLocalization.Culture, FlowDirection.LeftToRight, new Typeface(comparison.FontFamily, comparison.FontStyle, comparison.FontWeight, comparison.FontStretch), comparison.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(comparison).PixelsPerDip) { MaxTextWidth = Math.Max(1, comparison.ActualWidth) };
                         Check(comparison.ActualHeight + 2 >= formatted.Height, "long conflict status wraps without vertical cropping");
                         foreach (FrameworkElement control in panel.Children)
@@ -188,12 +193,24 @@ namespace CodexIsland
                         Rect last = expected.GetRectFromCharacterIndex(expected.Text.Length - 1);
                         Check(!last.IsEmpty && last.Top >= -1 && last.Bottom <= expected.ActualHeight + 1, "last manifest glyph reachable without cropping");
                     }
-                    Console.WriteLine("PASS: 12 populated checksum layouts, zh/en, light/dark, 320/480/760 widths; wrapped conflict text, unmodified manifest and reachable first/last glyphs.");
+                    Console.WriteLine("PASS: 12 populated checksum layouts, zh/en, light/dark, 320/480/760 widths; equal aligned export buttons, uncropped captions, wrapped conflict text, unmodified manifest and reachable first/last glyphs.");
                 }
                 finally { window.Close(); AppAppearance.Configure(language, theme); }
             }
         }
         private static void PumpLayout() { var frame = new DispatcherFrame(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false)); Dispatcher.PushFrame(frame); }
+        private static void CheckCaption(DependencyObject element)
+        {
+            var text = element as TextBlock;
+            if (text != null && !String.IsNullOrEmpty(text.Text))
+            {
+                var measured = new FormattedText(text.Text, UiLocalization.Culture, FlowDirection.LeftToRight, new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch), text.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(text).PixelsPerDip) { MaxTextWidth = Math.Max(1, text.ActualWidth) };
+                Check(text.ActualHeight + 1 >= measured.Height, "export caption wraps without vertical clipping");
+                var parent = VisualTreeHelper.GetParent(text) as FrameworkElement;
+                if (parent != null) { Point point = text.TranslatePoint(new Point(), parent); Check(point.X >= -1 && point.X + text.ActualWidth <= parent.ActualWidth + 1, "export caption remains within button content width"); }
+            }
+            for (int index = 0; index < VisualTreeHelper.GetChildrenCount(element); index++) CheckCaption(VisualTreeHelper.GetChild(element, index));
+        }
         private static T Field<T>(object target, string name) { return (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target); }
         private static void Invoke(object target, string name) { target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(target, null); }
         private static void SetFile(FileHashPanel panel, string path) { panel.GetType().GetMethod("SetFile", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(panel, new object[] { path }); }

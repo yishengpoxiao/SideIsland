@@ -15,6 +15,12 @@ internal sealed record IntegrationSources(
 {
     public Func<int[], CancellationToken, Task<PortQuerySnapshot>>? ReadPorts { get; init; }
     public Func<string, Task>? WritePortReport { get; init; }
+    public Func<string, Task<string?>>? ChooseChecksumDestination { get; init; }
+    public Func<string, Task>? WriteChecksumText { get; init; }
+    public Func<bool, TimeSpan, CancellationToken, Task<string?>>? SetAwake { get; init; }
+    public Func<AwakeSnapshot>? ReadAwake { get; init; }
+    public Func<CancellationToken, Task<VolumeSnapshot>>? ReadVolume { get; init; }
+    public Func<int, bool, CancellationToken, Task<string?>>? SetVolume { get; init; }
 }
 
 internal sealed class CodexQuotaSession(string executable, string home) : IQuotaSession

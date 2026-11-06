@@ -10,14 +10,18 @@ internal static class Program
         try
         {
             if (PortToolTests.TryRunHelper(args, out int helperExit)) return helperExit;
+            if (PowerToolTests.TryRunHelper(args, out helperExit)) return helperExit;
             bool portsOnly = args.Contains("--ports-only");
+            bool hashOnly = args.Contains("--hash-only");
             bool uiOnly = args.Contains("--ui-only");
-            if (portsOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: ports-only; this is not a complete regression run."); PortToolTests.Run(); }
-            else if (!uiOnly) { PlacementTests.Run(); SharedCoreTests.Run(); ProviderTests.Run(); PortToolTests.Run(); BatchFileTests.Run(); NotificationTests.Run(); WatchTests.Run(); }
+            if (hashOnly) Console.WriteLine("DIAGNOSTIC SELECTION: hash-only; this is not a complete regression run.");
+            else if (portsOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: ports-only; this is not a complete regression run."); PortToolTests.Run(); }
+            else if (!uiOnly) { PlacementTests.Run(); SharedCoreTests.Run(); ProviderTests.Run(); PortToolTests.Run(); BatchFileTests.Run(); NotificationTests.Run(); WatchTests.Run(); PowerToolTests.Run(); }
             else Console.WriteLine("DIAGNOSTIC SELECTION: UI-only; this is not a complete regression run.");
             AppBuilder.Configure<IslandApplication>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia().WithInterFont().SetupWithoutStarting();
+            if (hashOnly) { HashToolTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); Console.WriteLine("PASS: hash-only diagnostic selection; full regression still required."); return 0; }
             if (portsOnly) { PortToolTests.RunUi(); Console.WriteLine("PASS: ports-only diagnostic selection; full regression still required."); return 0; }
-            IntegrationLifecycleTests.Run(); MacNotchTests.Run(); ScreenPinTests.Run(); BatchFileTests.RunImages(); InteractionTests.Run(); HashToolTests.Run(); DiffToolTests.Run(); PortToolTests.RunUi(); WatchTests.RunUi(); LayoutTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal)));
+            IntegrationLifecycleTests.Run(); MacNotchTests.Run(); ScreenPinTests.Run(); BatchFileTests.RunImages(); InteractionTests.Run(); HashToolTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); DiffToolTests.Run(); PortToolTests.RunUi(); WatchTests.RunUi(); PowerToolTests.RunUi(); LayoutTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal)));
             Console.WriteLine(uiOnly ? "PASS: UI-only diagnostic selection; full regression still required." : "PASS: portable geometry, shared models, notch contracts and actual Avalonia layout matrix. Target macOS/Linux native execution is not implied."); return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }

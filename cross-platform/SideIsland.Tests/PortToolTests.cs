@@ -109,7 +109,7 @@ internal static class PortToolTests
         var window = new IslandWindow(true,directory,sources);
         try
         {
-            window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("ports"); Flush(window);
+            window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("ports"); Flush(window);
             var input = Find<TextBox>(window,"ports-input"); var copy = Find<Button>(window,"ports-copy"); var state = Find<TextBlock>(window,"ports-status");
             Click(Find<Button>(window,"ports-query")); var old = window.LatestPortQuery; input.Text = "8080";
             Check(pending[0].Token.IsCancellationRequested && !copy.IsEnabled, "editing query cancels old work and clears copy immediately");
@@ -135,7 +135,7 @@ internal static class PortToolTests
     {
         foreach(string language in new[]{"en","zh"}) foreach(bool light in new[]{false,true}) foreach(int width in new[]{320,480,760}) foreach(int height in new[]{360,720}) foreach(double scale in new[]{1d,1.25,1.5,2})
         {
-            window.Settings.Language=language; window.Settings.LightTheme=light; window.RequestedThemeVariant=light?ThemeVariant.Light:ThemeVariant.Dark;
+            AppearanceTestActions.Set(window, language, light);
             window.SetRenderScaling(scale); window.SelectToolForTest("ports"); window.Width=width; window.Height=height; Flush(window);
             Find<TextBox>(window,"ports-input").Text="3000, 8080"; int index=pending.Count; Click(Find<Button>(window,"ports-query")); var task=window.LatestPortQuery;
             pending[index].Completion.SetResult(source with { RequestedPorts=[3000,8080], Issues=[new("diagnostic","Permission denied · 合成提示")], Owners=[new(8080,"TCP",42,"中文 program with a long name","/a/long/程序路径/with-spaces/app","[2001:db8::1]:8080","peer:54321","ESTABLISHED","IPv6")] }); Await(window,task);

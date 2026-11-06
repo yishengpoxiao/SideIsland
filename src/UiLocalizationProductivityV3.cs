@@ -19,7 +19,19 @@ namespace CodexIsland
 请先选择文件，再匹配校验清单。|Choose a file before matching a checksum list.
 清单中没有与所选文件名完全一致的记录。|No entry exactly matches the selected filename.
 清单中存在同名文件或冲突校验值，请仅保留目标记录。|Duplicate filenames or conflicting checksums: keep only the intended entry.
-清单格式无效，请使用所选算法的 GNU 或 BSD 校验清单。|Use a valid GNU or BSD checksum list for the selected algorithm.");
+清单格式无效，请使用所选算法的 GNU 或 BSD 校验清单。|Use a valid GNU or BSD checksum list for the selected algorithm.
+复制清单|Copy manifest
+另存清单|Save manifest
+清单仅包含文件名和校验值；另存为新文件，不覆盖现有文件。|Manifests contain only the filename and checksum. Save to a new file; existing files stay unchanged.
+已复制校验清单。|Checksum manifest copied.
+保存校验清单|Save checksum manifest
+计算结果已更新，请重新导出清单。|The result has changed. Export the current manifest again.
+不能覆盖源文件，请另选新文件名。|Choose a new filename to keep the source file unchanged.
+校验清单已保存。|Checksum manifest saved.
+正在保存校验清单…|Saving checksum list…
+校验值已计算，但文件名无法导出为 UTF-8 清单。仍可复制校验值。|Checksum calculated. This filename cannot be exported as UTF-8; you can still copy the digest.
+清单未保存：目标可能已存在或不可写，请选择新文件名。|Not saved: the destination may exist or be unavailable. Choose a new filename.
+清单保存失败，请检查路径和权限。|Could not save the manifest. Check the path and permissions.");
             Map(@"▣ 截图提字|▣ Screen text
 截图 OCR / 图片文字识别|Screen OCR / Image text recognition
 ≡ 文本模板|≡ Text templates

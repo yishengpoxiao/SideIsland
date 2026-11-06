@@ -14,7 +14,7 @@ namespace SideIsland.Tests;
 
 internal static class HashToolTests
 {
-    public static void Run()
+    public static void Run(string? artifactDirectory = null)
     {
         string directory = Path.Combine(Path.GetTempPath(), "side-island-hash-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory); string file = Path.Combine(directory, "下载 file.txt"), other = Path.Combine(directory, "empty.txt");
@@ -23,7 +23,7 @@ internal static class HashToolTests
         var window = new IslandWindow(true, Path.Combine(directory, "settings"));
         try
         {
-            window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("hash"); Flush(window);
+            window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("hash"); Flush(window);
             var path = Find<TextBox>(window, "hash-path"); var expected = Find<TextBox>(window, "hash-expected"); var algorithm = Find<ComboBox>(window, "hash-algorithm");
             var result = Find<TextBox>(window, "hash-result"); var status = Find<TextBlock>(window, "hash-status");
             var compute = Find<Button>(window, "hash-compute"); var cancel = Find<Button>(window, "hash-cancel");
@@ -64,6 +64,7 @@ internal static class HashToolTests
             Check(layouts == 96, "filled checksum layout matrix is complete");
             Console.WriteLine("PASS: real-file SHA-256/SHA-512 checksum UI, GNU/BSD manifests, Unicode filenames, mismatch/ambiguity, cancel/completion race, stale path/page/language suppression; headless UI, no native desktop claim.");
             Console.WriteLine("PASS: 96 populated checksum layouts with multiline manifest and conflict message; zh/en, light/dark, 320/480/760 widths, 360/720 heights and 100/125/150/200% headless scaling.");
+            HashExportTests.Run(artifactDirectory);
         }
         finally { window.Close(); Dispatcher.UIThread.RunJobs(); Directory.Delete(directory, true); }
     }
@@ -74,7 +75,7 @@ internal static class HashToolTests
         foreach (string language in new[] { "en", "zh" }) foreach (bool light in new[] { false, true })
         foreach (int width in new[] { 320, 480, 760 }) foreach (int height in new[] { 360, 720 }) foreach (double scale in new[] { 1d, 1.25, 1.5, 2 })
         {
-            window.Settings.Language = language; window.Settings.LightTheme = light; window.RequestedThemeVariant = light ? ThemeVariant.Light : ThemeVariant.Dark;
+            AppearanceTestActions.Set(window, language, light);
             window.SetRenderScaling(scale); window.SelectToolForTest("hash"); window.Width = width; window.Height = height; Flush(window);
             Find<TextBox>(window, "hash-path").Text = file; Find<ComboBox>(window, "hash-algorithm").SelectedIndex = 0; Find<TextBox>(window, "hash-expected").Text = manifest;
             Click(Find<Button>(window, "hash-compute")); Flush(window);

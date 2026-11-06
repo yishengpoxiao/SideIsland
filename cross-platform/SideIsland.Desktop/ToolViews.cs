@@ -100,18 +100,6 @@ public sealed partial class IslandWindow
         var length = new NumericUpDown { Minimum = 8, Maximum = 128, Value = 20, FormatString = "0" }; var result = Input("random-result", "", true); result.IsReadOnly = true; body.Children.Add(Hint(T("密码长度", "Password length"))); body.Children.Add(length);
         body.Children.Add(Actions(Button(T("生成密码", "Generate password"), () => result.Text = RandomTools.Password(new PasswordOptions { Length = (int)(length.Value ?? 20), Uppercase = true, Lowercase = true, Digits = true, Symbols = true })), AsyncButton(T("复制", "Copy"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(result.Text ?? ""); }))); body.Children.Add(result);
     }
-    private void RenderAwake()
-    {
-        body.Children.Add(Hint(T("只在所选时长内阻止系统自动休眠，退出岛后结束。", "Temporarily inhibits automatic sleep; quitting the island releases it.")));
-        body.Children.Add(Actions(new[] { 30, 60, 120 }.Select(minutes => AsyncButton(minutes + T(" 分钟", " min"), async () => { if (testMode) return; var error = await platform.SetAwakeAsync(true, TimeSpan.FromMinutes(minutes), lifetime.Token); if (error is not null) throw new InvalidOperationException(error); awakeUntil = DateTime.UtcNow.AddMinutes(minutes); Report(T("已开始保持唤醒。", "Keeping awake.")); })).Cast<Control>().ToArray()));
-        body.Children.Add(AsyncButton(T("结束保持唤醒", "Stop keeping awake"), async () => { if (!testMode) { var error = await platform.SetAwakeAsync(false, TimeSpan.Zero, lifetime.Token); if (error is not null) throw new InvalidOperationException(error); } awakeUntil = default; RefreshCompact(); }));
-    }
-    private void RenderVolume()
-    {
-        var level = new Slider { Minimum = 0, Maximum = 100, Value = 50, Margin = new(0, 12) }; var muted = new CheckBox { Content = T("静音", "Mute") }; var state = Hint(T("点击读取后查看当前音量。", "Read to inspect current volume.")); body.Children.Add(level); body.Children.Add(muted); body.Children.Add(state);
-        body.Children.Add(Actions(AsyncButton(T("读取音量", "Read volume"), async () => { if (testMode) return; var value = await platform.ReadVolumeAsync(lifetime.Token); if (!value.Available) throw new InvalidOperationException(value.Error); level.Value = value.Percent; muted.IsChecked = value.Muted; state.Text = value.Percent + "%"; }), AsyncButton(T("应用", "Apply"), async () => { if (testMode) return; var error = await platform.SetVolumeAsync((int)level.Value, muted.IsChecked == true, lifetime.Token); if (error is not null) throw new InvalidOperationException(error); })));
-        body.Children.Add(Hint(T("此预览版提供系统音量。Mac 通用分应用音量不能直接照搬 Windows Core Audio；没有安装虚拟音频驱动。", "This preview controls system volume. Mac per-app volume needs separate support; no virtual audio driver is installed.")));
-    }
     private void RenderActivities()
     {
         taskRows = new StackPanel { Spacing = 3 }; body.Children.Add(taskRows); RenderTaskRows();

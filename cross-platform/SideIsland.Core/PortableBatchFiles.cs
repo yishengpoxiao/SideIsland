@@ -123,6 +123,23 @@ public sealed class PortableBatchFiles : IDisposable
     {
         var dot = name.LastIndexOf('.'); return dot > 0 ? name[dot..] : "";
     }
+    /// <summary>Fits a generated output name while retaining its suffix and extension, without splitting a Unicode scalar.</summary>
+    public static string FitOutputName(string stem, string suffix, string extension)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stem); ArgumentNullException.ThrowIfNull(suffix); ArgumentNullException.ThrowIfNull(extension);
+        ValidateName(stem + suffix + extension, false);
+        var ending = suffix + extension;
+        var remainingChars = 240 - ending.Length; var remainingBytes = 255 - Encoding.UTF8.GetByteCount(ending);
+        var length = 0;
+        while (length < stem.Length)
+        {
+            if (!Rune.TryGetRuneAt(stem, length, out var rune)) throw new ArgumentException("The output filename contains invalid Unicode.");
+            if (rune.Utf16SequenceLength > remainingChars || rune.Utf8SequenceLength > remainingBytes) break;
+            length += rune.Utf16SequenceLength; remainingChars -= rune.Utf16SequenceLength; remainingBytes -= rune.Utf8SequenceLength;
+        }
+        if (length == 0) throw new ArgumentException("The output suffix and extension leave no room for a filename.");
+        var name = stem[..length] + ending; ValidateName(name); return name;
+    }
     public static PortableFileSnapshot ReadLocalSnapshot(string path, long maximumBytes, CancellationToken token = default)
     {
         if (!System.IO.Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal) || maximumBytes is < 1 or > 128 * 1024 * 1024) throw new ArgumentException("Use a local absolute source path and a bounded snapshot size.");
@@ -146,7 +163,7 @@ public sealed class PortableBatchFiles : IDisposable
         for (var suffix = 0; suffix < 10000; suffix++)
         {
             token.ThrowIfCancellationRequested();
-            var name = stem + (suffix == 0 ? "" : "-" + suffix) + extension; ValidateName(name);
+            var name = suffix == 0 ? preferredName : FitOutputName(stem, "-" + suffix.ToString(CultureInfo.InvariantCulture), extension);
             SafeFileHandle handle;
             if (OperatingSystem.IsWindows())
             {
@@ -168,11 +185,17 @@ public sealed class PortableBatchFiles : IDisposable
         }
         throw new IOException("Cannot allocate an unused output filename.");
     }
-    public static void ValidateName(string name)
+    public static void ValidateName(string name) => ValidateName(name, true);
+    private static void ValidateName(string name, bool checkLength)
     {
         if (string.IsNullOrWhiteSpace(name) || name is "." or ".." || name.Any(char.IsControl)
-            || name.IndexOfAny(['/', '\\', '\0']) >= 0 || Encoding.UTF8.GetByteCount(name) > 255 || name.Length > 240)
+            || name.IndexOfAny(['/', '\\', '\0']) >= 0 || (checkLength && (Encoding.UTF8.GetByteCount(name) > 255 || name.Length > 240)))
             throw new ArgumentException("The generated filename is empty, too long or contains a path separator/control character.");
+        for (var index = 0; index < name.Length;)
+        {
+            if (!Rune.TryGetRuneAt(name, index, out var rune)) throw new ArgumentException("The filename contains invalid Unicode.");
+            index += rune.Utf16SequenceLength;
+        }
         if (!OperatingSystem.IsWindows()) return;
         var stem = name.Split('.')[0].ToUpperInvariant();
         if (name.EndsWith('.') || name.EndsWith(' ') || name.IndexOfAny(['<', '>', ':', '"', '|', '?', '*']) >= 0

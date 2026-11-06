@@ -122,7 +122,7 @@ internal static class WatchTests
         var window = new IslandWindow(true, directory);
         try
         {
-            window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("watch"); Flush(window);
+            window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("watch"); Flush(window);
             typeof(IslandWindow).GetMethod("EnsureNotifications", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
             var notifications = Field<NotificationCenter>(window, "notificationCenter");
             notifications.Publish(new("side-island", "Side Island", "Synthetic source registration", "Own fixture", DateTimeOffset.UtcNow, Internal: true));
@@ -138,7 +138,7 @@ internal static class WatchTests
             Check(notifications.Items.Count == 0 && Find<StackPanel>(window, "watch-rows").GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text == "Completed") && !Find<StackPanel>(window, "watch-rows").GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text?.Contains("notified", StringComparison.Ordinal) == true), "disabled notification source does not produce a false delivery claim");
             foreach (var language in new[] { "zh", "en" }) foreach (bool light in new[] { false, true }) foreach (int width in new[] { 320, 480, 760 })
             {
-                window.Settings.Language = language; window.Settings.LightTheme = light; window.Width = width; window.SelectToolForTest("watch"); Flush(window);
+                AppearanceTestActions.Set(window, language, light); window.Width = width; window.SelectToolForTest("watch"); Flush(window);
                 var rows = Find<StackPanel>(window, "watch-rows"); Check(rows.Children.Count == 1, "language/theme rebuild preserves watch state");
                 foreach (var button in rows.GetVisualDescendants().OfType<Button>()) foreach (var caption in button.GetVisualDescendants().OfType<TextBlock>())
                     Check(caption.DesiredSize.Width <= caption.Bounds.Width + 1 && caption.DesiredSize.Height <= caption.Bounds.Height + 1, "populated watch action caption fits compact layout");
@@ -170,7 +170,7 @@ internal static class WatchTests
             typeof(IslandWindow).GetField("watchBook", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, book);
             try
             {
-                window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("watch"); Flush(window);
+                window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("watch"); Flush(window);
                 Find<TextBox>(window, "watch-file").Text = Path.Combine(directory, "guard-target"); Click(Find<Button>(window, "watch-add-file"));
                 Wait(window, () => entered.IsSet); Check(!Find<Button>(window, "watch-add-file").IsEnabled && !Find<Button>(window, "watch-add-process").IsEnabled, "one pending addition disables both add actions");
                 window.SelectToolForTest("notes"); window.SelectToolForTest("watch"); Flush(window);
@@ -190,7 +190,7 @@ internal static class WatchTests
             var window = new IslandWindow(true, Path.Combine(directory, "completion-" + action));
             try
             {
-                window.Settings.Language = "en"; window.Show(); window.Expand(); window.SelectToolForTest("watch"); Flush(window);
+                window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("watch"); Flush(window);
                 var book = Field<WatchBook>(window, "watchBook"); var tasks = Field<TaskActivityHub>(window, "tasks");
                 typeof(IslandWindow).GetMethod("EnsureNotifications", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
                 var notices = Field<NotificationCenter>(window, "notificationCenter");

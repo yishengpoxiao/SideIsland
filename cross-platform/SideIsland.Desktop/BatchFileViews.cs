@@ -31,7 +31,8 @@ public sealed partial class IslandWindow
         return false;
     }
     private PortableBatchFiles BatchEngine => batchEngine ??= new PortableBatchFiles(store.DirectoryPath);
-    private static string[] BatchPaths(string text) => text.Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    // Spaces can be part of a Unix filename. Blank lines are ignored; selected paths are never trimmed.
+    private static string[] BatchPaths(string text) => text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
     private static int BatchNumber(string? text, int minimum, int maximum)
     {
         if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < minimum || value > maximum) throw new ArgumentException($"Enter a whole number from {minimum} to {maximum}.");
@@ -200,10 +201,9 @@ internal static class PortableBatchImages
                 }
                 token.ThrowIfCancellationRequested();
                 if (encoded.Length > 128 * 1024 * 1024) throw new IOException("Encoded image exceeds the output memory limit.");
-                var name = Path.GetFileNameWithoutExtension(source.Path);
-                if (name.Length > 100) name = name[..100];
-                if (name.Length > 0 && char.IsHighSurrogate(name[^1])) name = name[..^1];
-                var output = PortableBatchFiles.WriteNewOutput(options.OutputDirectory, name + "-processed." + options.Format.ToLowerInvariant(), encoded.ToArray(), token);
+                var sourceName = Path.GetFileName(source.Path); var sourceExtension = PortableBatchFiles.Extension(sourceName);
+                var name = PortableBatchFiles.FitOutputName(sourceName[..(sourceName.Length - sourceExtension.Length)], "-processed", "." + options.Format.ToLowerInvariant());
+                var output = PortableBatchFiles.WriteNewOutput(options.OutputDirectory, name, encoded.ToArray(), token);
                 var result = new PortableImageResult(source.Path, output, size.Width, size.Height, source.Source.Sha256); results.Add(result);
                 Log(new { kind = "saved", result, utc = DateTime.UtcNow }); progress?.Report(new("images", index + 1, files.Length));
             }

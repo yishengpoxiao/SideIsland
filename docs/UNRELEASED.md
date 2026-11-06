@@ -4,6 +4,14 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Checksum export and background controls
+
+Windows and the preview can now copy or save a calculated SHA-256 / SHA-512 checksum list. Exports use the GNU binary format, contain only the basename and digest, and save UTF-8 without a BOM using LF line endings. Existing files, directories and symlinks are never replaced. A save picker returning after a changed calculation, navigation or closure cannot export an obsolete result. Disk publication runs in the background; duplicate save requests are suppressed. A native filename that cannot be represented faithfully in UTF-8 still supports hashing and copying the digest, with manifest export unavailable.
+
+The parser now supports GNU escaped filenames (`\\`, `\n`, `\r`) while retaining exact filename matching and rejecting malformed escape sequences. See the [GNU checksum output format](https://www.gnu.org/software/coreutils/manual/html_node/cksum-output-modes.html). File-name Unicode and whitespace are not normalized or silently replaced.
+
+The preview's keep-awake countdown now uses the actual helper launch deadline. Stop/replace/close operations invalidate older replies, and closing the service cancels queued operations. Volume reads cannot overwrite a newer slider/mute edit; one write can run across page reconstruction without accumulating obsolete writes. Batch image output and collision suffixes now fit both UTF-8 byte and UTF-16 length limits without splitting Unicode characters. Path lists retain meaningful trailing spaces on Unix.
+
 ## Preview port reports and task watches
 
 The macOS/Linux preview now provides full port reports with capture time, local/peer endpoints, address family, socket state, process IDs and executable paths. Usable records are retained alongside command, permission, parsing or incomplete-output warnings. The UI shows up to 200 cards; copying includes every parsed record, subject to an explicit 1 Mi character report limit. Input changes, cancellation, navigation and newer requests invalidate late replies. A missing record is never presented as a guarantee that a port is free.
@@ -20,7 +28,7 @@ The preview also invalidates in-flight media/quota requests when disconnected, r
 
 ## File verification
 
-The checksum tool accepts a raw SHA-256 / SHA-512 value or a GNU/BSD checksum list. Paste a release's `SHA256SUMS` or `SHA512SUMS` text and select the downloaded file. Matching uses the exact, case-sensitive filename; different paths with the same filename or conflicting values require an unambiguous entry. Filenames in the list are never opened. Lists are limited to 128 Ki characters and 1,024 lines; GNU escaped filenames are not supported.
+The checksum tool accepts a raw SHA-256 / SHA-512 value or a GNU/BSD checksum list. Paste a release's `SHA256SUMS` or `SHA512SUMS` text and select the downloaded file. Matching uses the exact, case-sensitive filename; different paths with the same filename or conflicting values require an unambiguous entry. Filenames in the list are never opened. Lists are limited to 128 Ki characters and 1,024 lines, including escaped filename text.
 
 ## Correctness fixes
 
@@ -34,6 +42,9 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 
 ## Development validation (2026-11-06)
 
+- The fourth batch passed seven affected Windows suites with unchanged source hashes, including 182 export checks, actual GNU `sha256sum`/`sha512sum` output and `--check --strict` interoperability, and a real filesystem filename that cannot be exported as strict UTF-8. Controlled blocked writes proved that the UI remains responsive; earlier dispatcher-blocking evidence is retained.
+- Two complete preview rounds then passed with unchanged source hashes and no compiler warnings: 4,032 general layouts, 192 populated checksum comparison layouts, 192 successful checksum export layouts, 192 port layouts, 24 watch layouts and 49,920 general action-caption checks. Saved headless light-English and dark-Chinese renderings were visually reviewed. The appearance fixtures now invoke actual header actions and assert shell background, navigation text/colors and framework theme; changing preferences alone in some earlier populated fixtures did not establish a full shell transition.
+- Batch checks passed 64 Core / 91 cumulative Core-and-image cases using real owned Windows files and Avalonia codecs. Unix trailing-space filename execution remains conditional on running the suite on Unix. Keep-awake tests launched only owned inert helper processes and compared their actual start times with deadlines; controlled volume/awake UI providers reproduced and verified the three original ordering/deadline failures. Native system volume and sleep policies were not changed.
 - The third batch passed nine affected Windows suites with unchanged source hashes, including 46 settings recovery checks and the settings/notification and tool-page layout matrices. Chinese compiler diagnostics were independently verified in PowerShell 7 and Windows PowerShell 5.1. Cross-platform targeted checks cover real owned helper-process success/failure/output-limit/timeout/cancellation, delayed port replies, 48 watch-model checks, blocked-probe fairness and bounds, and real UI add/remove/clear/close races. Clearing history cannot recreate cleared activities through late callbacks.
 - The third batch passed two consecutive complete preview rounds with unchanged source hashes and no compiler warnings: 4,032 general tool layouts, 192 populated checksum layouts, 192 populated port layouts, 24 populated watch layouts and 49,536 general action-caption checks. The general/port/checksum matrices cover English/Chinese, light/dark themes, three widths, two heights and 100/125/150/200% headless scaling. Native Mac/Ubuntu testing and the blocked Windows alpha test remain outstanding.
 - The second improvement batch passed ten affected Windows suites, including the complete tool-page and settings/notification layout matrices, theme checks, tool transitions and mode workload. Independent verification of the actual diff exporter applied 299 generated patches with Git and compared the resulting file bytes; all passed. Two unchanged cases returned no patch. Port report/queue checks cover 250 owners, partial protocol failures, Unicode paths, cancellation and disposal.
@@ -47,6 +58,14 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 ## 中文说明
 
 这些是 v1.0.0 之后的开发改动，已发布的 v1.0.0 安装包保持不变。
+
+Windows 和跨平台预览版新增校验清单复制／另存功能，支持 SHA-256／SHA-512。清单使用 GNU 二进制格式，只包含文件名与校验值，以 UTF-8 无 BOM、LF 换行保存；不会替换已有文件、文件夹或符号链接。保存对话框返回前若计算、输入、页面或窗口状态已改变，旧结果不会导出。磁盘保存改为后台执行，并阻止重复保存。无法完整编码为 UTF-8 的本机文件名仍可计算和复制校验值，仅禁用清单导出。
+
+清单解析新增 GNU 文件名转义支持（反斜杠、换行与回车），错误转义会被拒绝，不会规范化或悄悄替换文件名。跨平台保持唤醒改为使用辅助进程的实际启动截止时间，迟到的启动结果不能覆盖停止操作；关闭服务会取消排队请求。旧音量读取不能覆盖刚编辑的滑块／静音状态，切页不会堆积重复写入。批量图片的生成名称及重名编号同时遵守 UTF-8 字节和 UTF-16 长度限制，不切断 Unicode 字符，并保留 Unix 路径中有意义的末尾空格。
+
+第四批 Windows 最终通过 7 套相关回归，包含 182 项导出检查、真实 GNU 工具互操作和无法编码为 UTF-8 的真实文件名；阻塞保存测试证明磁盘操作不再挡住界面。跨平台最终连续两轮完整回归通过：4,032 个常规布局、192 个填充校验对照页、192 个已完成的清单导出页、192 个端口页、24 个守望页，以及 49,920 项常规按钮文字检查，源码哈希未变化。测试现在点击实际语言／主题按钮，并验证背景、导航文字与颜色；部分旧填充矩阵只改设置值，不能单独证明整页主题已切换。已实际查看英文亮色与中文暗色渲染图。
+
+批量文件／图片通过 64 项 Core、91 项累计检查；真实 Unix 末尾空格文件测试仍需在 Unix 主机执行。保持唤醒测试只启动自有无副作用的测试辅助进程，音量与唤醒界面使用可控制返回顺序的测试源；没有改变实际系统音量或睡眠策略。修复前失败、首次测试、最终结果和源码哈希均已保留。
 
 Mac／Linux 预览版新增端口完整报告，包含采集时间、本地／远端地址、地址族、状态、PID 和程序路径；命令失败、权限不足、解析失败或输出不完整时保留可用记录并说明问题。界面最多显示 200 张卡片，复制包含全部已解析记录，超过 1 Mi 字符会提示。修改输入、取消、切页或新查询会使旧结果失效；没有记录不能证明端口空闲。
 
@@ -66,7 +85,7 @@ Windows 和跨平台预览版的文字对照支持复制、保存完整 UTF-8 �
 
 第二批改动的跨平台最终连续两轮回归通过：4,032 个常规工具布局、192 个填充内容的校验页布局、48,768 项按钮文字检查，源码哈希未变。异步回写使用可控制返回顺序的测试源验证，不等同于新的播放器实测或 Mac／Ubuntu 实机验证。
 
-文件校验支持粘贴单个 SHA-256 / SHA-512 值，或 GNU/BSD 格式的整份校验清单，再按所选下载文件的名称匹配。文件名区分大小写；不同目录的同名文件或相互冲突的校验值需要先消除歧义。程序只解析文字，不读取清单中的路径。最多支持 128 Ki 字符、1,024 行，暂不支持 GNU 转义文件名。
+文件校验支持粘贴单个 SHA-256 / SHA-512 值，或 GNU/BSD 格式的整份校验清单，再按所选下载文件的名称匹配。文件名区分大小写；不同目录的同名文件或相互冲突的校验值需要先消除歧义。程序只解析文字，不读取清单中的路径。最多支持 128 Ki 字符、1,024 行，GNU 转义文件名同样计入限制。
 
 日志守望修复了历史末行误报、空文件首次追加漏报，以及同一行后续追加重复提醒。跨平台预览版修复了长中文／emoji 笔记导致重启后设置重置的问题；超大保存会保留原文件，无法读取的设置会在恢复保存前备份。Windows Avalonia 预览包采用独立文件名，打包时拒绝覆盖现有安装包及校验记录。
 

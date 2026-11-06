@@ -16,6 +16,8 @@ namespace SideIsland.Desktop.Platforms;
 public sealed record MediaSnapshot(bool Available, string Player, string Title, string Artist,
     string? ArtworkUri, double? PositionSeconds, double? DurationSeconds, bool Playing, string? Error);
 public sealed record VolumeSnapshot(bool Available, int Percent, bool Muted, string? Error);
+public sealed record AwakeSnapshot(bool Active, DateTime UntilUtc, string? Error);
+internal sealed record AwakeCommand(string Path, IReadOnlyList<string> Arguments);
 
 /// <summary>
 /// Opt-in desktop integrations. Reading Mac media contacts Apple Music only, and
@@ -34,6 +36,9 @@ public sealed partial class CommandPlatformService : IDisposable
     private string? awakeError;
     private string? preferredPlayer;
     private bool disposed;
+    private readonly Func<int, AwakeCommand>? awakeCommand;
+    public CommandPlatformService() { }
+    internal CommandPlatformService(Func<int, AwakeCommand> awakeCommand) { this.awakeCommand = awakeCommand; }
 
     public string Description => OperatingSystem.IsMacOS()
         ? "macOS: Apple Music (explicit Automation connection), system volume, lsof, caffeinate. Other players and per-app volume are not provided by this adapter."
@@ -46,6 +51,10 @@ public sealed partial class CommandPlatformService : IDisposable
         get { lock (gate) return awakeProcess is not null && !HasExited(awakeProcess) && DateTime.UtcNow < awakeUntilUtc; }
     }
     public string? AwakeError { get { lock (gate) return awakeError; } }
+    public AwakeSnapshot AwakeState
+    {
+        get { lock (gate) { bool active = awakeProcess is not null && !HasExited(awakeProcess) && DateTime.UtcNow < awakeUntilUtc; return new(active, active ? awakeUntilUtc : default, awakeError); } }
+    }
 
     public async Task<MediaSnapshot> ReadMediaAsync(CancellationToken cancellationToken)
     {
@@ -100,8 +109,9 @@ public sealed partial class CommandPlatformService : IDisposable
     public async Task<VolumeSnapshot> ReadVolumeAsync(CancellationToken cancellationToken)
     {
         CheckAlive(cancellationToken);
-        await volumeChanges.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await ReadVolumeCoreAsync(cancellationToken).ConfigureAwait(false); }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        await volumeChanges.WaitAsync(linked.Token).ConfigureAwait(false);
+        try { return await ReadVolumeCoreAsync(linked.Token).ConfigureAwait(false); }
         finally { volumeChanges.Release(); }
     }
 
@@ -135,19 +145,21 @@ public sealed partial class CommandPlatformService : IDisposable
     {
         CheckAlive(cancellationToken);
         if (percent is < 0 or > 100) return "Volume must be between 0 and 100.";
-        await volumeChanges.WaitAsync(cancellationToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        await volumeChanges.WaitAsync(linked.Token).ConfigureAwait(false);
         try
         {
+            CheckAlive(linked.Token);
             if (OperatingSystem.IsMacOS())
             {
                 string script = "set volume output volume " + percent.ToString(CultureInfo.InvariantCulture) + " output muted " + (muted ? "true" : "false");
-                var result = await RunAsync("osascript", new[] { "-e", script }, cancellationToken);
+                var result = await RunAsync("osascript", new[] { "-e", script }, linked.Token).ConfigureAwait(false);
                 return result.Success ? null : Explain(result, "The selected macOS output does not accept system volume changes.");
             }
             if (!OperatingSystem.IsLinux()) return "Volume control is unavailable on this platform.";
-            var volume = await RunAsync("pactl", new[] { "set-sink-volume", "@DEFAULT_SINK@", percent.ToString(CultureInfo.InvariantCulture) + "%" }, cancellationToken);
+            var volume = await RunAsync("pactl", new[] { "set-sink-volume", "@DEFAULT_SINK@", percent.ToString(CultureInfo.InvariantCulture) + "%" }, linked.Token).ConfigureAwait(false);
             if (!volume.Success) return Explain(volume, "The output volume could not be changed.");
-            var mute = await RunAsync("pactl", new[] { "set-sink-mute", "@DEFAULT_SINK@", muted ? "1" : "0" }, cancellationToken);
+            var mute = await RunAsync("pactl", new[] { "set-sink-mute", "@DEFAULT_SINK@", muted ? "1" : "0" }, linked.Token).ConfigureAwait(false);
             return mute.Success ? null : Explain(mute, "Volume changed, but updating mute failed. Read the current state before retrying.");
         }
         finally { volumeChanges.Release(); }
@@ -183,37 +195,44 @@ public sealed partial class CommandPlatformService : IDisposable
     {
         CheckAlive(cancellationToken);
         if (enabled && (duration <= TimeSpan.Zero || duration > TimeSpan.FromDays(1))) return "Keep-awake duration must be greater than zero and at most 24 hours.";
-        await awakeChanges.WaitAsync(cancellationToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        await awakeChanges.WaitAsync(linked.Token).ConfigureAwait(false);
         try
         {
+            CheckAlive(linked.Token);
             if (!enabled) { StopAwake(); return null; }
-            string executable; string[] arguments;
+            string executable; IReadOnlyList<string> arguments; string? path;
             int seconds = (int)Math.Ceiling(duration.TotalSeconds);
-            if (OperatingSystem.IsMacOS()) { executable = "caffeinate"; arguments = new[] { "-i", "-t", seconds.ToString(CultureInfo.InvariantCulture) }; }
-            else if (OperatingSystem.IsLinux())
+            if (awakeCommand is not null) { var resolved = awakeCommand(seconds); path = resolved.Path; arguments = resolved.Arguments; }
+            else
             {
-                string? sleep = FindCommand("sleep");
-                if (sleep is null) return "Keep awake requires the system sleep command; no package was installed.";
-                executable = "systemd-inhibit";
-                arguments = new[] { "--what=idle:sleep", "--mode=block", "--who=Side Island", "--why=Temporary keep awake requested by the user", sleep, seconds.ToString(CultureInfo.InvariantCulture) };
+                if (OperatingSystem.IsMacOS()) { executable = "caffeinate"; arguments = new[] { "-i", "-t", seconds.ToString(CultureInfo.InvariantCulture) }; }
+                else if (OperatingSystem.IsLinux())
+                {
+                    string? sleep = FindCommand("sleep");
+                    if (sleep is null) return "Keep awake requires the system sleep command; no package was installed.";
+                    executable = "systemd-inhibit";
+                    arguments = new[] { "--what=idle:sleep", "--mode=block", "--who=Side Island", "--why=Temporary keep awake requested by the user", sleep, seconds.ToString(CultureInfo.InvariantCulture) };
+                }
+                else return "Keep awake is unavailable on this platform.";
+                path = FindCommand(executable); if (path is null) return Missing(executable);
             }
-            else return "Keep awake is unavailable on this platform.";
-            string? path = FindCommand(executable);
-            if (path is null) return Missing(executable);
             var process = NewProcess(path, arguments);
             try { StartOwned(process); }
             catch (Exception error) when (error is Win32Exception or IOException or InvalidOperationException) { process.Dispose(); return Clean(error.Message, 600); }
+            DateTime startedUtc = DateTime.UtcNow;
+            try { startedUtc = process.StartTime.ToUniversalTime(); }
+            catch (Exception error) when (error is Win32Exception or InvalidOperationException or NotSupportedException) { }
             var output = new CapturedOutput(8192); var errors = new CapturedOutput(8192);
             Task drainOut = DrainAsync(process.StandardOutput, output, () => KillOwned(process));
             Task drainError = DrainAsync(process.StandardError, errors, () => KillOwned(process));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
             bool handedOff = false;
             try
             {
-                await Task.Delay(450, linked.Token);
+                await Task.Delay(450, linked.Token).ConfigureAwait(false);
                 if (HasExited(process))
                 {
-                    await FinishDraining(drainOut, drainError);
+                    await FinishDraining(drainOut, drainError).ConfigureAwait(false);
                     return "Keep-awake helper did not remain active. " + Clean(errors.Text, 600);
                 }
                 Process? previous;
@@ -222,7 +241,7 @@ public sealed partial class CommandPlatformService : IDisposable
                     linked.Token.ThrowIfCancellationRequested();
                     if (disposed) throw new ObjectDisposedException(nameof(CommandPlatformService));
                     previous = awakeProcess; awakeProcess = process;
-                    awakeUntilUtc = DateTime.UtcNow.AddSeconds(seconds); awakeError = null;
+                    awakeUntilUtc = startedUtc.AddSeconds(seconds); awakeError = null;
                 }
                 if (previous is not null) KillOwned(previous);
                 handedOff = true;
@@ -231,7 +250,7 @@ public sealed partial class CommandPlatformService : IDisposable
             }
             finally
             {
-                if (!handedOff) { KillOwned(process); await FinishDraining(drainOut, drainError); Forget(process); process.Dispose(); }
+                if (!handedOff) { KillOwned(process); await FinishDraining(drainOut, drainError).ConfigureAwait(false); Forget(process); process.Dispose(); }
             }
         }
         finally { awakeChanges.Release(); }
@@ -373,7 +392,7 @@ public sealed partial class CommandPlatformService : IDisposable
     {
         try
         {
-            await process.WaitForExitAsync(); await FinishDraining(stdout, stderr);
+            await process.WaitForExitAsync().ConfigureAwait(false); await FinishDraining(stdout, stderr).ConfigureAwait(false);
             lock (gate)
             {
                 if (ReferenceEquals(awakeProcess, process))
@@ -390,7 +409,7 @@ public sealed partial class CommandPlatformService : IDisposable
     private void StopAwake()
     {
         Process? previous;
-        lock (gate) { previous = awakeProcess; awakeProcess = null; awakeError = null; }
+        lock (gate) { previous = awakeProcess; awakeProcess = null; awakeUntilUtc = default; awakeError = null; }
         if (previous is not null) KillOwned(previous);
     }
     private void CheckAlive(CancellationToken cancellationToken)

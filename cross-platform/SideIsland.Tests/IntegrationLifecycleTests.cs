@@ -19,7 +19,7 @@ internal static class IntegrationLifecycleTests
         var source = new DelayedSources(); var window = new IslandWindow(true, directory, source.Create());
         try
         {
-            window.Settings.Language = "en"; window.Settings.Slot1 = "music"; window.Show(); window.Expand(); window.SelectToolForTest("media"); Flush(window);
+            window.Settings.Slot1 = "music"; window.Show(); window.Expand(); AppearanceTestActions.Set(window, "en", window.Settings.LightTheme); window.SelectToolForTest("media"); Flush(window);
             var connect = FindButton(window, "Connect / refresh"); Click(connect);
             Check(source.Media.Count == 1, "media request started by real connect handler");
             Click(FindButton(window, "Disconnect")); source.Media[0].Complete(Media("late after disconnect")); Wait(window, () => connect.IsEnabled);
@@ -54,7 +54,7 @@ internal static class IntegrationLifecycleTests
         var batchWindow = new IslandWindow(true, batchDirectory);
         try
         {
-            batchWindow.Settings.Language = "en"; batchWindow.Show(); batchWindow.Expand(); batchWindow.SelectToolForTest("batch-files"); Flush(batchWindow);
+            batchWindow.Show(); batchWindow.Expand(); AppearanceTestActions.Set(batchWindow, "en", batchWindow.Settings.LightTheme); batchWindow.SelectToolForTest("batch-files"); Flush(batchWindow);
             string original = Path.Combine(directory, "preview-only.txt"); File.WriteAllText(original, "synthetic preview fixture");
             using var engine = new PortableBatchFiles(batchDirectory); var plan = engine.Preview([original], new() { Template = "{name}_before" });
             typeof(IslandWindow).GetField("batchPlan", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(batchWindow, plan);

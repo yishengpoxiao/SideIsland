@@ -40,6 +40,8 @@ namespace CodexIsland
                 {
                     if (++count > 1024) { error = "too-large"; return false; }
                     if (String.IsNullOrWhiteSpace(line) || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                    bool escaped = line[0] == '\\';
+                    if (escaped) line = line.Substring(1);
                     string name = null, hash = null;
                     if (line.Length > length + 2 && line[length] == ' ' && (line[length + 1] == ' ' || line[length + 1] == '*'))
                     { hash = line.Substring(0, length); name = line.Substring(length + 2); }
@@ -48,7 +50,8 @@ namespace CodexIsland
                         int end = line.LastIndexOf(") = ", StringComparison.Ordinal);
                         if (end > algorithm.Length + 2) { name = line.Substring(algorithm.Length + 2, end - algorithm.Length - 2); hash = line.Substring(end + 4); }
                     }
-                    if (String.IsNullOrEmpty(name) || !TryNormalizeExpected(hash, algorithm, out digest)) { error = "manifest"; return false; }
+                    if (escaped && !TryUnescapeFilename(name, out name)) { error = "manifest"; return false; }
+                    if (String.IsNullOrEmpty(name) || name.IndexOf('\0') >= 0 || !TryNormalizeExpected(hash, algorithm, out digest)) { error = "manifest"; return false; }
                     if (!String.Equals(Basename(name), selected, StringComparison.Ordinal)) continue;
                     if (matchedName != null && (!String.Equals(name, matchedName, StringComparison.Ordinal) || digest != matchedHash))
                     { error = "ambiguous"; return false; }
@@ -64,8 +67,78 @@ namespace CodexIsland
         {
             // Backslashes are valid filename characters on Unix. Only the
             // current platform's actual separators may split a selected path.
-            try { return Path.GetFileName(path); }
-            catch (ArgumentException) { return null; }
+            // This parses text, not a native path: keep GNU escaped CR/LF names
+            // intact even on platforms that cannot create those filenames.
+            if (path == null || path.IndexOf('\0') >= 0) return null;
+            int last = Math.Max(path.LastIndexOf(Path.DirectorySeparatorChar), path.LastIndexOf(Path.AltDirectorySeparatorChar));
+            if (Path.DirectorySeparatorChar == '\\' && last < 1 && path.Length >= 2 && path[1] == ':') last = 1;
+            return path.Substring(last + 1);
+        }
+
+        private static bool TryUnescapeFilename(string value, out string name)
+        {
+            name = null;
+            if (value == null) return false;
+            var result = new StringBuilder(value.Length);
+            for (int i = 0; i < value.Length; i++)
+            {
+                char next = value[i];
+                if (next == '\\')
+                {
+                    if (++i == value.Length) return false;
+                    next = value[i];
+                    if (next == 'n') next = '\n';
+                    else if (next == 'r') next = '\r';
+                    else if (next != '\\') return false;
+                }
+                result.Append(next);
+            }
+            name = result.ToString(); return true;
+        }
+
+        // GNU binary untagged format; no source directories or absolute paths
+        // are exported. Preserve filename whitespace and use LF on every OS.
+        public static string CreateManifest(string digest, string algorithm, string sourcePath)
+        {
+            string normalized;
+            if (!TryNormalizeExpected(digest, algorithm, out normalized)) throw new ArgumentException("Invalid checksum.", "digest");
+            string name = Basename(sourcePath);
+            if (String.IsNullOrEmpty(name) || name == "." || name == "..") throw new ArgumentException("A filename is required.", "sourcePath");
+            bool escaped = name.IndexOfAny(new[] { '\\', '\n', '\r' }) >= 0;
+            if (escaped) name = name.Replace("\\", "\\\\").Replace("\n", "\\n").Replace("\r", "\\r");
+            string manifest = (escaped ? "\\" : "") + normalized + " *" + name + "\n";
+            if (manifest.Length > MaximumManifestLength) throw new ArgumentException("Checksum list is too large.", "sourcePath");
+            new UTF8Encoding(false, true).GetByteCount(manifest); // Reject malformed UTF-16; never replace filename bytes.
+            return manifest;
+        }
+
+        // Publish a fully written sibling file with no overwrite. This also
+        // refuses existing symlinks/reparse points and original source files;
+        // the final non-overwriting move protects a destination created after
+        // the preflight. Never delete a destination to make publication work.
+        public static void SaveManifestNew(string destination, string manifest)
+        {
+            if (String.IsNullOrEmpty(manifest) || manifest.Length > MaximumManifestLength) throw new ArgumentException("Invalid checksum list.", "manifest");
+            byte[] bytes = new UTF8Encoding(false, true).GetBytes(manifest);
+            string target = Path.GetFullPath(destination);
+            bool exists;
+            try { File.GetAttributes(target); exists = true; }
+            catch (FileNotFoundException) { exists = false; }
+            catch (DirectoryNotFoundException) { exists = false; }
+            if (exists) throw new IOException("The destination already exists. Choose a new filename.");
+            string temporary = Path.Combine(Path.GetDirectoryName(target), ".side-island-checksum-" + Guid.NewGuid().ToString("N") + ".tmp");
+            bool owned = false;
+            try
+            {
+                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    owned = true;
+                    stream.Write(bytes, 0, bytes.Length); stream.Flush(true);
+                }
+                File.Move(temporary, target); // Two-argument overload never replaces existing files.
+                owned = false;
+            }
+            finally { if (owned) { try { File.Delete(temporary); } catch { } } }
         }
 
         public static string ComputeFile(string path, string algorithm, CancellationToken cancellation, IProgress<int> progress = null)

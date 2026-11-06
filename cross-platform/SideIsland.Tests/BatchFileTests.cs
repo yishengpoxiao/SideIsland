@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Reflection;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
@@ -111,6 +112,32 @@ internal static class BatchFileTests
         var first = PortableBatchFiles.WriteNewOutput(outputDirectory, "result.txt", "first"u8.ToArray());
         var second = PortableBatchFiles.WriteNewOutput(outputDirectory, "result.txt", "second"u8.ToArray());
         Check(first != second && File.ReadAllText(first) == "first" && File.ReadAllText(second) == "second", "new output allocation never replaces an existing file");
+        var boundaryName = new string('中', 83) + "ab.txt";
+        Check(Encoding.UTF8.GetByteCount(boundaryName) == 255, "owned collision fixture reaches the UTF-8 component limit");
+        var allocated = Enumerable.Range(0, 12).Select(index => PortableBatchFiles.WriteNewOutput(outputDirectory, boundaryName, Encoding.UTF8.GetBytes("owned-" + index))).ToArray();
+        Check(allocated.Distinct(StringComparer.Ordinal).Count() == 12 && allocated.Select((path, index) => File.ReadAllText(path) == "owned-" + index).All(value => value), "near-limit collisions allocate unique names through two-digit suffixes without changing prior outputs");
+        Check(allocated.All(path => Encoding.UTF8.GetByteCount(Path.GetFileName(path)) <= 255 && Path.GetFileName(path).EndsWith(".txt", StringComparison.Ordinal)), "collision names retain extension and stay within the byte limit");
+        var emojiName = string.Concat(Enumerable.Repeat("😀", 63)) + ".x";
+        var emojiFirst = PortableBatchFiles.WriteNewOutput(outputDirectory, emojiName, "emoji-first"u8.ToArray());
+        var emojiSecond = PortableBatchFiles.WriteNewOutput(outputDirectory, emojiName, "emoji-second"u8.ToArray());
+        Check(Path.GetFileName(emojiSecond) == string.Concat(Enumerable.Repeat("😀", 62)) + "-1.x" && File.ReadAllText(emojiFirst) == "emoji-first", "UTF-8 collision fitting never splits a surrogate pair or replaces the first output");
+        Check(PortableBatchFiles.FitOutputName(new string('a', 237), "-12", ".txt").Length == 240, "generated names also respect the UTF-16 component limit");
+        Reject(() => PortableBatchFiles.FitOutputName(new string('中', 85) + "/invalid", "-1", ".txt"), "invalid path characters cannot be hidden by output truncation");
+        Reject(() => PortableBatchFiles.FitOutputName(new string('中', 85) + "\ud800", "-1", ".txt"), "invalid Unicode cannot be hidden by output truncation");
+        Reject(() => PortableBatchFiles.FitOutputName("name", "", "." + new string('x', 255)), "extension cannot be silently truncated");
+        Reject(() => PortableBatchFiles.WriteNewOutput(outputDirectory, new string('中', 85) + ".txt", []), "explicit over-limit output names remain rejected");
+        var parsePaths = typeof(IslandWindow).GetMethod("BatchPaths", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var literal = fixture.Path("literal-trailing.txt ");
+        var parsed = (string[])parsePaths.Invoke(null, ["\r\n" + literal + "\r\n \t \n" + a + "\n"])!;
+        Check(parsed.SequenceEqual([literal, a]), "batch path parsing preserves literal spaces and ignores only blank lines");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.WriteAllText(literal, "literal-space-source"); var trimmed = literal.TrimEnd(); File.WriteAllText(trimmed, "different-file");
+            var literalPlan = engine.Preview([parsed[0]], new() { Prefix = "moved-" }); engine.Execute(literalPlan);
+            Check(File.ReadAllText(literalPlan.Items[0].DestinationPath) == "literal-space-source" && File.ReadAllText(trimmed) == "different-file", "real Unix trailing-space path addresses only the exact selected file");
+            engine.Undo(); Check(File.ReadAllText(literal) == "literal-space-source", "Unix trailing-space source restored exactly by undo");
+        }
+        else Console.WriteLine("INFO: trailing-space path preservation tested as a parser contract on Windows; real Unix filename fixture runs only on Unix.");
         var snapshot = PortableBatchFiles.ReadLocalSnapshot(first, 20); Check(snapshot.Source.Length == 5 && snapshot.Bytes.SequenceEqual("first"u8.ToArray()), "bounded strong-identity snapshot");
         Reject(() => PortableBatchFiles.ReadLocalSnapshot(first, 2), "snapshot size limit before allocation");
         var disposeSource = fixture.File("dispose/source.txt", "dispose");
@@ -144,6 +171,21 @@ internal static class BatchFileTests
         var repeated = PortableBatchImages.Process([source], new(output, "PNG", 8, 8), fixture.Data);
         Check(repeated[0].OutputPath != png[0].OutputPath && File.Exists(png[0].OutputPath), "image output collision uses a new name");
         Check(originalHash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(source))), "source image remains byte identical");
+        var longChinese = fixture.Path(new string('中', 83) + ".png"); File.Copy(source, longChinese);
+        var longEmoji = fixture.Path(string.Concat(Enumerable.Repeat("😀", 62)) + ".png"); File.Copy(source, longEmoji);
+        Check(Encoding.UTF8.GetByteCount(Path.GetFileName(longChinese)) == 253 && Encoding.UTF8.GetByteCount(Path.GetFileName(longEmoji)) == 252, "real image fixtures approach the byte limit while remaining valid source names");
+        var unicodeImages = Task.Run(() => PortableBatchImages.Process([longChinese, longEmoji], new(output, "PNG", 8, 8), fixture.Data)).GetAwaiter().GetResult();
+        Check(unicodeImages.Count == 2 && unicodeImages.All(result => Encoding.UTF8.GetByteCount(Path.GetFileName(result.OutputPath)) <= 255 && result.OutputPath.EndsWith("-processed.png", StringComparison.Ordinal)), "long Chinese and emoji image names preserve generated suffix and extension within filesystem limits");
+        foreach (var result in unicodeImages)
+        {
+            using var decoded = new Bitmap(result.OutputPath); Check(decoded.PixelSize == new PixelSize(8, 4), "near-limit named output is an actual readable resized PNG");
+            Check(originalHash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(result.SourcePath))), "long-name image source bytes remain unchanged");
+        }
+        var unicodeAgain = PortableBatchImages.Process([longChinese, longEmoji], new(output, "PNG", 8, 8), fixture.Data);
+        Check(unicodeAgain.All(next => unicodeImages.All(previous => next.OutputPath != previous.OutputPath)) && unicodeImages.All(previous => File.Exists(previous.OutputPath)), "repeated long-name image output allocates new files and preserves prior files");
+        var dotImage = fixture.Path(".png"); File.Copy(source, dotImage);
+        var dotResult = PortableBatchImages.Process([dotImage], new(output, "PNG", 8, 8), fixture.Data);
+        Check(Path.GetFileName(dotResult[0].OutputPath) == ".png-processed.png" && File.Exists(dotImage), "dotfile image keeps a nonempty literal stem");
         var oversized = new byte[24]; new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(oversized, 0); BinaryPrimitives.WriteInt32BigEndian(oversized.AsSpan(8, 4), 13); "IHDR"u8.CopyTo(oversized.AsSpan(12, 4)); BinaryPrimitives.WriteInt32BigEndian(oversized.AsSpan(16, 4), 10000); BinaryPrimitives.WriteInt32BigEndian(oversized.AsSpan(20, 4), 10000);
         Reject(() => PortableBatchImages.ReadDimensions(oversized), "decompression bomb rejected before decode");
         Reject(() => PortableBatchImages.ReadDimensions([0xff, 0xd8, 0xff, 0xe0, 0, 1]), "malformed JPEG header");
@@ -162,7 +204,7 @@ internal static class BatchFileTests
             typeof(IslandWindow).GetField("batchPlan", flags)!.SetValue(window, uiPlan);
             for (var cycle = 0; cycle < 8; cycle++)
             {
-                window.Settings.Language = cycle % 2 == 0 ? "zh" : "en"; window.Settings.LightTheme = cycle % 2 == 0;
+                AppearanceTestActions.Set(window, cycle % 2 == 0 ? "zh" : "en", cycle % 2 == 0);
                 window.SelectToolForTest("batch-files"); Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
                 Check(ReferenceEquals(typeof(IslandWindow).GetField("batchPlan", flags)!.GetValue(window), uiPlan), "queued initial TextChanged does not invalidate a preview during language/theme/page rebuild");
             }
