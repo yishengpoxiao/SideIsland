@@ -4,6 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using CodexIsland;
+using SideIsland.Core;
 
 namespace SideIsland.Desktop;
 
@@ -23,7 +24,7 @@ public sealed partial class IslandWindow
         var progress = new ProgressBar { Name = "hash-progress", Minimum = 0, Maximum = 100, Height = 4 };
         var exportNote = Hint(T("此文件名无法导出为 UTF-8 清单，仍可复制校验值。", "This filename cannot be exported as a UTF-8 list. The digest can still be copied.")); exportNote.Name = "hash-export-note"; exportNote.IsVisible = false;
         var content = new StackPanel { Spacing = 6 };
-        CancellationTokenSource? pending = null; long revision = 0; bool detached = false, exporting = false;
+        CancellationTokenSource? pending = null, pendingSave = null; long revision = 0; bool detached = false, exporting = false;
         ChecksumExport? completed = null; Button? copy = null, copyManifest = null, saveManifest = null;
         bool CanExport() => !closing && !detached && !exporting && pending is null && completed is not null;
         bool CanExportManifest() => CanExport() && completed!.Manifest is not null;
@@ -42,13 +43,13 @@ public sealed partial class IslandWindow
             // Only changes from the captured inputs invalidate current work.
             if (lastTarget == (path.Text ?? "") && lastExpected == (expected.Text ?? "") && lastAlgorithm == algorithm.SelectedIndex) return;
             lastTarget = path.Text ?? ""; lastExpected = expected.Text ?? ""; lastAlgorithm = algorithm.SelectedIndex;
-            revision++; pending?.Cancel(); result.Text = ""; completed = null; progress.Value = 0; UpdateExportActions();
+            revision++; pending?.Cancel(); pendingSave?.Cancel(); result.Text = ""; completed = null; progress.Value = 0; UpdateExportActions();
             state.Text = T("输入已更新，请重新计算。", "Inputs changed. Calculate again."); state.Foreground = TextBrush;
         }
         void SetFailure(string message) { state.Text = message; state.Foreground = new SolidColorBrush(Color.Parse(prefs.LightTheme ? "#9A5B00" : "#FF9F0A")); }
         async Task Calculate()
         {
-            long request = ++revision; result.Text = ""; completed = null; progress.Value = 0; state.Foreground = TextBrush; UpdateExportActions();
+            long request = ++revision; pendingSave?.Cancel(); result.Text = ""; completed = null; progress.Value = 0; state.Foreground = TextBrush; UpdateExportActions();
             string target = path.Text ?? "", kind = algorithm.SelectedIndex == 1 ? "SHA512" : "SHA256", comparison = expected.Text ?? "";
             lastTarget = target; lastExpected = comparison; lastAlgorithm = algorithm.SelectedIndex;
             if (string.IsNullOrWhiteSpace(target)) { SetFailure(T("请先选择文件。", "Choose a file first.")); return; }
@@ -123,6 +124,7 @@ public sealed partial class IslandWindow
         async Task SaveExport()
         {
             if (!CanExportManifest()) return; var snapshot = completed!; long request = revision; exporting = true; UpdateExportActions();
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); pendingSave = cancellation;
             bool Current() => !closing && !detached && revision == request && ReferenceEquals(completed, snapshot);
             try
             {
@@ -143,17 +145,25 @@ public sealed partial class IslandWindow
                 // A picker can remain open while the inputs or page change.
                 if (destination is null || !Current()) return;
                 string fullPath = Path.GetFullPath(destination);
-                if (string.Equals(fullPath, snapshot.SourcePath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                if (string.Equals(fullPath, snapshot.SourcePath, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
                 { SetFailure(T("请选择新的清单文件名，不能使用原文件路径。", "Choose a new list filename, not the original file path.")); return; }
-                await Task.Run(() => FileHashTools.SaveManifestNew(fullPath, snapshot.Manifest!));
+                if (integrations.SaveChecksumManifest is { } writer) await writer(fullPath, snapshot.Manifest!, cancellation.Token);
+                else await Task.Run(() => FileHashTools.SaveManifestNew(fullPath, snapshot.Manifest!, (target, bytes) => PortableFilePublication.WriteNew(target, bytes, cancellation.Token)), cancellation.Token);
                 if (Current()) state.Text = T("校验清单已另存为新文件。", "Checksum list saved as a new file.");
             }
-            catch (IOException) { if (Current()) SetFailure(T("未保存：目标可能已存在或无法写入，请选择新文件名。", "Not saved: the destination may exist or be unwritable. Choose a new filename.")); }
+            catch (OperationCanceledException) { }
+            catch (FilePublicationException error) when (error.State == FilePublicationState.OutcomeUnknown)
+            {
+                if (!testMode) DiagnosticLog.Write("checksum-export-outcome-unknown", error);
+                if (Current()) SetFailure(FilePublicationFeedback.Unknown(error, prefs.Language));
+                else if (!closing) Notice(T("校验清单保存结果需核对", "Check the checksum save result"), FilePublicationFeedback.Unknown(error, prefs.Language));
+            }
+            catch (IOException) { if (Current()) SetFailure(T("未保存：目标已存在、不可写或不支持安全保存。请选择新文件名或其他位置。", "Not saved: the destination exists, is unwritable or does not support safe saving. Choose a new name or location.")); }
             catch (Exception error)
             {
                 if (Current()) { if (!testMode) DiagnosticLog.Write("checksum-export-failed", error); SetFailure(T("无法保存清单，请检查位置和权限。", "Could not save the list. Check its location and permissions.")); }
             }
-            finally { exporting = false; if (!closing && !detached) UpdateExportActions(); }
+            finally { if (ReferenceEquals(pendingSave, cancellation)) pendingSave = null; exporting = false; if (!closing && !detached) UpdateExportActions(); }
         }
         saveManifest = AsyncButton(T("保存清单", "Save list"), () => LatestChecksumExport = SaveExport(), CanExportManifest); saveManifest.Name = "hash-save-manifest";
         path.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty) Invalidate(); };
@@ -164,7 +174,7 @@ public sealed partial class IslandWindow
         content.Children.Add(expected); content.Children.Add(Actions(compute, cancel)); content.Children.Add(progress); content.Children.Add(state); content.Children.Add(result); content.Children.Add(Actions(copy, copyManifest, saveManifest));
         content.Children.Add(exportNote);
         content.Children.Add(Hint(T("导出只包含文件名和校验值，保存不会覆盖已有文件。清单按文件名匹配，重名冲突时不会猜测。", "Exports contain only the filename and digest, and never overwrite an existing file. Ambiguous filename matches are rejected.")));
-        content.DetachedFromVisualTree += (_, _) => { detached = true; revision++; pending?.Cancel(); completed = null; UpdateExportActions(); };
+        content.DetachedFromVisualTree += (_, _) => { detached = true; revision++; pending?.Cancel(); pendingSave?.Cancel(); completed = null; UpdateExportActions(); };
         UpdateExportActions();
         body.Children.Add(content);
     }

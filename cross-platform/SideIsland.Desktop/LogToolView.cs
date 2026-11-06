@@ -4,6 +4,8 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using SideIsland.Core;
+using System.Globalization;
+using System.Text;
 
 namespace SideIsland.Desktop;
 
@@ -12,12 +14,19 @@ public sealed partial class IslandWindow
     private readonly PortableLogController logController = new();
     private TextBox? logPath, logOutput;
     private TextBlock? logState, logSummary, logDraftHint, logKeywordsHint;
-    private Button? logStop, logClear, logCopy, logChoose;
+    private Button? logStop, logClear, logCopy, logChoose, logSave;
+    private TextBlock? logExportFeedback;
+    private bool savingLog;
+    private long logExportRevision;
+    private CancellationTokenSource? logExportCancellation;
+    private string logExportState = "", logExportTarget = "", logExportDiagnostic = "";
+    private DateTimeOffset logExportTime;
     private string logStartedDraft = "", logFilter = "";
     private bool logFollow = true, choosingLog, copyingLog, invalidLogKeywords;
     private DateTime nextLog;
     internal Task LatestLogPoll { get; private set; } = Task.CompletedTask;
     internal Task LatestLogChoose { get; private set; } = Task.CompletedTask;
+    internal Task LatestLogExport { get; private set; } = Task.CompletedTask;
 
     private void RenderLogs()
     {
@@ -28,11 +37,11 @@ public sealed partial class IslandWindow
         var start = Button(T("开始 / 重新开始", "Start / restart"), () => StartLog(path.Text ?? "")); start.Name = "log-start";
         body.Children.Add(Actions(choose, start));
         logDraftHint = Hint(""); logDraftHint.Name = "log-draft-hint"; body.Children.Add(logDraftHint);
-        path.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty && ReferenceEquals(logPath, path)) RefreshLogView(); };
+        path.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty && ReferenceEquals(logPath, path)) { InvalidateLogExport(); RefreshLogView(); } };
 
         body.Children.Add(Hint(T("提醒关键词（逗号分隔，不区分大小写）", "Alert keywords (comma-separated, case-insensitive)")));
         var keywords = Input("log-keywords", "error, exception, failed, 失败, 错误"); keywords.Name = "log-keywords";
-        keywords.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty && !closing) { ApplyLogKeywords(keywords.Text ?? ""); RefreshLogView(); } };
+        keywords.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty && !closing) { InvalidateLogExport(); ApplyLogKeywords(keywords.Text ?? ""); RefreshLogView(); } };
         body.Children.Add(keywords);
         logKeywordsHint = Hint(""); logKeywordsHint.Name = "log-keywords-hint"; body.Children.Add(logKeywordsHint);
 
@@ -41,18 +50,28 @@ public sealed partial class IslandWindow
         body.Children.Add(Card(new StackPanel { Spacing = 4, Children = { logState, logSummary } }));
         var search = Input("log-search"); search.Name = "log-search";
         search.PlaceholderText = T("筛选显示内容，不影响提醒", "Filter displayed lines; alerts are unchanged"); logFilter = search.Text ?? "";
-        search.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty) { logFilter = search.Text ?? ""; RefreshLogView(); } }; body.Children.Add(search);
+        search.PropertyChanged += (_, e) => { if (e.Property == TextBox.TextProperty) { InvalidateLogExport(); logFilter = search.Text ?? ""; RefreshLogView(); } }; body.Children.Add(search);
         var follow = new CheckBox { Name = "log-follow", IsChecked = logFollow, Content = Text(T("跟随最新内容", "Follow latest lines"), 12) };
         follow.IsCheckedChanged += (_, _) => { logFollow = follow.IsChecked == true; if (logFollow) ScrollLogToEnd(); }; body.Children.Add(follow);
         logOutput = new TextBox { Name = "log-output", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 160, MaxHeight = 240, FontSize = 11, FontFamily = new FontFamily("Cascadia Mono, Menlo, DejaVu Sans Mono, monospace") };
         ScrollViewer.SetHorizontalScrollBarVisibility(logOutput, Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled);
         ScrollViewer.SetVerticalScrollBarVisibility(logOutput, Avalonia.Controls.Primitives.ScrollBarVisibility.Auto);
         body.Children.Add(logOutput);
+        var output = logOutput;
+        output.DetachedFromVisualTree += (_, _) => { if (ReferenceEquals(logOutput, output)) InvalidateLogExport(); };
         logStop = Button(T("停止", "Stop"), () => { if (closing) return; logController.Stop(); Report(""); RefreshLogView(); }); logStop.Name = "log-stop";
-        logClear = Button(T("清除视图", "Clear view"), () => { if (closing) return; logController.Clear(); Report(""); RefreshLogView(); }); logClear.Name = "log-clear";
+        logClear = Button(T("清除视图", "Clear view"), () => { if (closing) return; InvalidateLogExport(); logController.Clear(); Report(""); RefreshLogView(); }); logClear.Name = "log-clear";
         logCopy = AsyncButton(T("复制显示内容", "Copy shown"), CopyLogAsync, () => !copyingLog && !closing && !string.IsNullOrEmpty(logOutput?.Text)); logCopy.Name = "log-copy";
-        body.Children.Add(Actions(logStop, logClear, logCopy));
+        logSave = AsyncButton(T("另存显示内容", "Save shown"), () => LatestLogExport = SaveLogSnapshotAsync(), CanSaveLogSnapshot); logSave.Name = "log-save";
+        foreach (var action in new[] { logStop, logClear, logCopy, logSave }) action.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch;
+        body.Children.Add(Actions(logStop, logClear)); body.Children.Add(Actions(logCopy, logSave));
+        logExportFeedback = Hint(""); logExportFeedback.Name = "log-export-feedback"; body.Children.Add(logExportFeedback);
+        body.Children.Add(Hint(T("另存点击时的筛选结果快照（UTF-8，无 BOM），不会导出整个源文件或覆盖已有文件；新增日志不改变已选快照。", "Save a snapshot of the filtered lines shown when clicked (UTF-8, no BOM), not the entire source file. Existing files stay intact; later lines do not change the snapshot.")));
         body.Children.Add(Hint(T("每秒读取，收起或切页后继续；退出即停止。仅保留最近 1,000 行／512 Ki 字符，每行最多 4,000 字符。首次最多读取末尾 64 KiB；大量积压时跳到末尾。清除视图不修改文件。", "Checks every second, including while collapsed or on another page; exits with the app. Keeps the latest 1,000 lines / 512 Ki characters, up to 4,000 characters per line. Initial reads use the last 64 KiB; large backlogs skip to the tail. Clear view never changes the file.")));
+        // A new shell can be built before its ContentPresenter attaches it.
+        // Refresh eligibility once attached, after every action field exists;
+        // otherwise Save shown stays disabled until an unrelated later poll.
+        output.AttachedToVisualTree += (_, _) => { if (!closing && ReferenceEquals(logOutput, output)) RefreshLogView(true); };
         RefreshLogView(true);
     }
 
@@ -80,6 +99,7 @@ public sealed partial class IslandWindow
     private void StartLog(string target)
     {
         if (closing) return;
+        InvalidateLogExport();
         string keywords = drafts.GetValueOrDefault("log-keywords", "error, exception, failed, 失败, 错误");
         if (!ApplyLogKeywords(keywords)) { RefreshLogView(); return; }
         try
@@ -147,6 +167,90 @@ public sealed partial class IslandWindow
         logStop!.IsEnabled = snapshot.Running; logClear!.IsEnabled = snapshot.Lines.Count > 0;
         logCopy!.IsEnabled = text.Length > 0 && !copyingLog;
         logChoose!.IsEnabled = !choosingLog;
+        logSave!.IsEnabled = CanSaveLogSnapshot(); RefreshLogExportFeedback();
+    }
+
+    private bool CanSaveLogSnapshot() => !closing && !savingLog && logOutput is { } output && output.IsAttachedToVisualTree() && !string.IsNullOrEmpty(output.Text);
+    private void InvalidateLogExport()
+    {
+        logExportRevision++; logExportCancellation?.Cancel();
+        logExportState = savingLog ? "invalidated" : "";
+        RefreshLogExportFeedback();
+    }
+    private void RefreshLogExportFeedback()
+    {
+        if (closing || logExportFeedback is null) return;
+        string time = logExportTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        logExportFeedback.Text = logExportState switch
+        {
+            "choosing" => T("选择快照保存位置…", "Choose where to save the snapshot…"),
+            "saving" => T("正在保存点击时的快照…", "Saving the snapshot captured when clicked…"),
+            "invalidated" => T("内容或页面已变化，尚未提交的导出已取消。", "Content or page changed; any uncommitted export was cancelled."),
+            "saved" => T($"已保存 {time} 的显示快照。", $"Saved the displayed snapshot captured at {time}."),
+            "saved-earlier" => T($"已保存先前 {time} 点击时的快照，不包含后续修改。", $"Saved the earlier snapshot captured at {time}, without later edits."),
+            "source" => T("请选择新的文件名，不能使用源日志路径。", "Choose a new filename, not the source log path."),
+            "local" => T("请选择本机文件位置。", "Choose a local file location."),
+            "failed" => T("未保存：目标可能已存在、无法写入或不支持安全保存，请选择新名称或其他位置。", "Not saved: the destination may exist, be unwritable or not support safe saving. Choose a new name or another location."),
+            "unknown" => logExportDiagnostic,
+            _ => ""
+        };
+        if (logExportState is "saved" or "saved-earlier") logExportFeedback.Text += "\n" + logExportTarget;
+        logExportFeedback.IsVisible = !string.IsNullOrEmpty(logExportFeedback.Text);
+    }
+    private async Task SaveLogSnapshotAsync()
+    {
+        if (!CanSaveLogSnapshot() || testMode && integrations.ChooseLogDestination is null) return;
+        // Freeze the displayed, bounded and filtered view before the picker. A
+        // normal poll may append lines; it does not invalidate this user choice.
+        string text = logOutput!.Text!, source = logController.Snapshot.Path;
+        long request = logExportRevision; var captured = DateTimeOffset.Now;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        logExportCancellation = cancellation; savingLog = true; logExportState = "choosing"; logExportTime = captured;
+        logExportTarget = ""; logExportDiagnostic = ""; RefreshLogView();
+        bool Current() => !closing && request == logExportRevision && !cancellation.IsCancellationRequested;
+        try
+        {
+            string suggested = "log-shown-" + captured.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".txt";
+            string? destination;
+            if (integrations.ChooseLogDestination is not null) destination = await integrations.ChooseLogDestination(suggested);
+            else
+            {
+                using var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = T("另存显示日志快照", "Save displayed log snapshot"), SuggestedFileName = suggested, DefaultExtension = "txt", ShowOverwritePrompt = false,
+                    FileTypeChoices = [new("Text") { Patterns = ["*.txt", "*.log"] }]
+                });
+                destination = file?.TryGetLocalPath();
+                if (file is not null && destination is null && Current()) logExportState = "local";
+            }
+            if (!Current()) return;
+            if (destination is null) { if (logExportState != "local") logExportState = ""; return; }
+            string target = Path.GetFullPath(destination);
+            // macOS commonly uses a case-insensitive volume; conservatively
+            // protect case aliases even if the captured source has disappeared.
+            if (source.Length > 0 && string.Equals(target, Path.GetFullPath(source), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
+            { logExportState = "source"; return; }
+            byte[] bytes = new UTF8Encoding(false, true).GetBytes(text);
+            logExportState = "saving"; RefreshLogExportFeedback();
+            if (integrations.SaveLogSnapshot is not null) await integrations.SaveLogSnapshot(target, bytes, cancellation.Token);
+            else await Task.Run(() => PortableFilePublication.WriteNew(target, bytes, cancellation.Token), cancellation.Token);
+            // Publication's return confirms success, even if cancellation arrived
+            // after commit. Do not label that already-saved file as cancelled.
+            if (!closing) { logExportState = Current() ? "saved" : "saved-earlier"; logExportTarget = target; }
+        }
+        catch (FilePublicationException error) when (error.State == FilePublicationState.OutcomeUnknown)
+        {
+            if (!testMode) DiagnosticLog.Write("log-export-outcome-unknown", error);
+            if (!closing) { logExportState = "unknown"; logExportDiagnostic = FilePublicationFeedback.Unknown(error, prefs.Language); }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception error)
+        { if (Current()) { logExportState = "failed"; if (!testMode) DiagnosticLog.Write("log-export-failed", error); } }
+        finally
+        {
+            if (ReferenceEquals(logExportCancellation, cancellation)) logExportCancellation = null;
+            savingLog = false; if (!closing) { RefreshLogView(); RefreshLogExportFeedback(); }
+        }
     }
 
     private void ScrollLogToEnd()

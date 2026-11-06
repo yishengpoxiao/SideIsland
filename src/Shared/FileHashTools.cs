@@ -112,15 +112,18 @@ namespace CodexIsland
             return manifest;
         }
 
-        // Publish a fully written sibling file with no overwrite. This also
-        // refuses existing symlinks/reparse points and original source files;
-        // the final non-overwriting move protects a destination created after
-        // the preflight. Never delete a destination to make publication work.
+        // The default path is the Windows/.NET Framework implementation. Unix
+        // callers must provide a native no-replace publisher: File.Move's Unix
+        // check/rename optimization cannot enforce exclusive publication.
         public static void SaveManifestNew(string destination, string manifest)
+        { SaveManifestNew(destination, manifest, null); }
+        public static void SaveManifestNew(string destination, string manifest, Action<string, byte[]> publisher)
         {
             if (String.IsNullOrEmpty(manifest) || manifest.Length > MaximumManifestLength) throw new ArgumentException("Invalid checksum list.", "manifest");
             byte[] bytes = new UTF8Encoding(false, true).GetBytes(manifest);
             string target = Path.GetFullPath(destination);
+            if (publisher != null) { publisher(target, bytes); return; }
+            if (Path.DirectorySeparatorChar != '\\') throw new PlatformNotSupportedException("Checksum export on Unix requires a native exclusive file publisher.");
             bool exists;
             try { File.GetAttributes(target); exists = true; }
             catch (FileNotFoundException) { exists = false; }
@@ -135,7 +138,7 @@ namespace CodexIsland
                     owned = true;
                     stream.Write(bytes, 0, bytes.Length); stream.Flush(true);
                 }
-                File.Move(temporary, target); // Two-argument overload never replaces existing files.
+                File.Move(temporary, target); // Windows-only; native MoveFile refuses existing entries.
                 owned = false;
             }
             finally { if (owned) { try { File.Delete(temporary); } catch { } } }

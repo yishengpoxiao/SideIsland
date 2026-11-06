@@ -85,7 +85,7 @@ internal static class HashExportTests
             FilledLayouts(window,source,artifactDirectory);
             Calculate(window,source,0); saving=StartSave(window); string closed=Path.Combine(directory,"closed.sha256"); window.Close(); pickers[^1].SetResult(closed); Await(window,saving);
             Check(!File.Exists(closed),"closing window suppresses late picker save");
-            Check(Directory.GetFiles(directory,".side-island-checksum-*.tmp").Length==0,"export attempts leave no owned temporary files");
+            Check(Directory.GetFiles(directory,".side-island-publish-*.tmp").Length==0,"export attempts leave no owned temporary files");
             SymlinkDestinations(directory,copied[1]);
             Console.WriteLine("PASS: actual checksum export controls, SHA256/SHA512 snapshot copies, new-file-only UTF8 saves, no source overwrite, delayed picker/clipboard edit/navigation/theme/language/close rejection and 96 populated export layouts; native pickers/clipboard are not exercised.");
         }
@@ -100,7 +100,7 @@ internal static class HashExportTests
             try { File.CreateSymbolicLink(link,linkTarget); }
             catch(Exception error) when(error is UnauthorizedAccessException or PlatformNotSupportedException || error is IOException && OperatingSystem.IsWindows() && (error.HResult & 0xffff) is 1314 or 50)
             { Console.WriteLine("SKIP: symlink export fixture unavailable on this host: "+error.GetType().Name); continue; }
-            bool refused=false; try{FileHashTools.SaveManifestNew(link,manifest);}catch(IOException){refused=true;}
+            bool refused=false; try{FileHashTools.SaveManifestNew(link,manifest,(path,bytes)=>SideIsland.Core.PortableFilePublication.WriteNew(path,bytes));}catch(IOException){refused=true;}
             Check(refused && new FileInfo(link).LinkTarget==linkTarget && File.ReadAllText(target)=="owned target" && (!dangling||!File.Exists(linkTarget)),"existing and dangling symlinks stay intact"); File.Delete(link);
         }
     }

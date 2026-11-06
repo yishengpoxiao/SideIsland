@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Net.Codecrete.QrCodeGenerator;
+using SideIsland.Core;
 
 namespace SideIsland.Desktop;
 
@@ -124,11 +125,18 @@ public sealed partial class IslandWindow
                 using var bitmap = qr.Bitmap(); using var png = new MemoryStream(); bitmap.Save(png, PngBitmapEncoderOptions.Default);
                 byte[] bytes = png.ToArray(); string target = Path.GetFullPath(destination);
                 status.Text = T("正在保存…", "Saving…");
-                await Task.Run(() => ScreenPinImageFiles.SaveNew(bytes, target, cancellation.Token), cancellation.Token);
+                if (integrations.SaveQrPng is { } writer) await writer(target, bytes, cancellation.Token);
+                else await Task.Run(() => ScreenPinImageFiles.SaveNew(bytes, target, cancellation.Token), cancellation.Token);
                 if (Current()) status.Text = T("PNG 已另存为新文件。", "PNG saved as a new file.");
             }
             catch (OperationCanceledException) { }
-            catch (IOException) { if (Current()) status.Text = T("未保存：目标可能已存在或无法写入，请选择新文件名。", "Not saved: the destination may exist or be unwritable. Choose a new filename."); }
+            catch (FilePublicationException error) when (error.State == FilePublicationState.OutcomeUnknown)
+            {
+                if (!testMode) DiagnosticLog.Write("qr-export-outcome-unknown", error);
+                if (Current()) status.Text = FilePublicationFeedback.Unknown(error, prefs.Language);
+                else if (!closing) Notice(T("二维码保存结果需核对", "Check the QR save result"), FilePublicationFeedback.Unknown(error, prefs.Language));
+            }
+            catch (IOException) { if (Current()) status.Text = T("未保存：目标已存在、不可写或不支持安全保存。请选择新文件名或其他位置。", "Not saved: the destination exists, is unwritable or does not support safe saving. Choose a new name or location."); }
             catch (Exception) { if (Current()) status.Text = T("无法保存图片，请检查位置和权限。", "Could not save the image. Check its location and permissions."); }
             finally { if (ReferenceEquals(pendingSave, cancellation)) pendingSave = null; saving = false; if (Available()) UpdateActions(); }
         }

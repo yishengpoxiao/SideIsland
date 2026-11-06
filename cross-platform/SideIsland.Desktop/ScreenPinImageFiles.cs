@@ -1,4 +1,5 @@
 using Avalonia.Media.Imaging;
+using SideIsland.Core;
 using SideIsland.Desktop.Platforms;
 
 namespace SideIsland.Desktop;
@@ -27,28 +28,5 @@ internal static class ScreenPinImageFiles
     }
 
     internal static void PublishNew(string destination, Action<Stream> encode, CancellationToken token)
-    {
-        token.ThrowIfCancellationRequested();
-        string target = Path.GetFullPath(destination);
-        bool exists;
-        try { File.GetAttributes(target); exists = true; }
-        catch (FileNotFoundException) { exists = false; }
-        catch (DirectoryNotFoundException) { exists = false; }
-        if (exists) throw new IOException("The destination already exists. Choose a new filename.");
-        string temporary = Path.Combine(Path.GetDirectoryName(target)!, ".side-island-pin-" + Guid.NewGuid().ToString("N") + ".tmp");
-        bool owned = false;
-        try
-        {
-            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                owned = true;
-                encode(output);
-                output.Flush(true);
-            }
-            token.ThrowIfCancellationRequested();
-            File.Move(temporary, target); // Never overwrite, including a target created while encoding.
-            owned = false;
-        }
-        finally { if (owned) { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } } }
-    }
+        => PortableFilePublication.WriteNew(destination, encode, token);
 }

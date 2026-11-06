@@ -70,7 +70,7 @@ internal static class ScreenPinLifecycleTests
         }
         string oversized = Path.Combine(directory, "oversized.png"); using (var stream = File.Create(oversized)) stream.SetLength(ScreenCaptureService.MaximumPngBytes + 1);
         bool sizeRejected = false; try { _ = await ScreenCaptureService.ReadPngSnapshotAsync(oversized, default); } catch (InvalidDataException) { sizeRejected = true; } Check(sizeRejected, "snapshot rejects a file over 64 MiB before allocating/decoding"); File.Delete(oversized);
-        Check(Directory.GetFiles(directory, ".side-island-pin-*.tmp").Length == 0, "success, encoder error, late collision and cancellation clean only owned staging files");
+        Check(Directory.GetFiles(directory, ".side-island-publish-*.tmp").Length == 0, "success, encoder error, late collision and cancellation clean only owned staging files");
     }
     private static void CaptureAndDecode()
     {

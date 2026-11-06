@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using SideIsland.Core;
 
 namespace SideIsland.Desktop;
 
@@ -89,7 +90,10 @@ public sealed class ScreenPinWindow : Window
         var percentage = Label("100%", 11); percentage.MinWidth = 36; percentage.TextAlignment = TextAlignment.Right; Grid.SetColumn(percentage, 2); opacity.Children.Add(percentage);
         alpha.ValueChanged += (_, _) => { state.SetAlpha(alpha.Value); Opacity = state.Alpha; percentage.Text = (state.Alpha * 100).ToString("0") + "%"; };
         Grid.SetRow(opacity, 3); root.Children.Add(opacity);
-        message = Label(T("拖动图片移动 · 滚轮缩放 · Esc 关闭", "Drag to move · Scroll to zoom · Esc to close"), 10); message.Opacity = .65; Grid.SetRow(message, 4); root.Children.Add(message);
+        message = Label(T("拖动图片移动 · 滚轮缩放 · Esc 关闭", "Drag to move · Scroll to zoom · Esc to close"), 10); message.Opacity = .65;
+        var messageView = new ScrollViewer { Name = "pin-message-scroll", Content = message, MaxHeight = 28, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+        Grid.SetRow(messageView, 4); root.Children.Add(messageView);
+        SizeChanged += (_, e) => messageView.MaxHeight = Math.Clamp(e.NewSize.Height - 162, 28, 96);
         Content = new Border { Child = root, Padding = new Thickness(10), CornerRadius = new CornerRadius(16), ClipToBounds = true, Background = new SolidColorBrush(Color.Parse(lightTheme ? "#FAFAFC" : "#1C1C1E")), BorderBrush = new SolidColorBrush(Color.Parse(lightTheme ? "#DCDCE2" : "#343438")), BorderThickness = new Thickness(1) };
         var context = new ContextMenu();
         foreach (var item in new[] { (T("适合窗口", "Fit image"), new Action(FitImage)), (T("原始大小", "Actual size"), new Action(() => { state.SetZoom(1); ApplyZoom(); })), (T("另存 PNG", "Save PNG"), new Action(RequestSave)), (T("关闭", "Close"), new Action(Close)) })
@@ -139,13 +143,18 @@ public sealed class ScreenPinWindow : Window
             if (destination is null || released) return;
             saveLifetime.Token.ThrowIfCancellationRequested();
             string fullPath = Path.GetFullPath(destination);
-            if (sourcePath is not null && string.Equals(fullPath, sourcePath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            if (sourcePath is not null && string.Equals(fullPath, sourcePath, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
             { message.Text = T("请选择新文件名，不能覆盖原图片。", "Choose a new filename to keep the original image unchanged."); return; }
             if (sources?.SavePng is { } save) await save(bitmap, fullPath, saveLifetime.Token);
             else await Task.Run(() => ScreenPinImageFiles.SaveNew(bitmap, fullPath, saveLifetime.Token), saveLifetime.Token);
             if (!released) message.Text = T("已另存新的 PNG", "Saved a new PNG");
         }
         catch (OperationCanceledException) { }
+        catch (FilePublicationException exception) when (exception.State == FilePublicationState.OutcomeUnknown)
+        {
+            if (!testMode) DiagnosticLog.Write("pin-export-outcome-unknown", exception);
+            if (!released) message.Text = FilePublicationFeedback.Unknown(exception, english ? "en" : "zh");
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException) { if (!released) message.Text = T("保存失败：", "Save failed: ") + exception.Message; }
         finally { saving = false; if (released) { bitmap.Dispose(); saveLifetime.Dispose(); } else saveButton.IsEnabled = true; }
     }

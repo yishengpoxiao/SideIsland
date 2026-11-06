@@ -4,6 +4,16 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Log snapshot export and exclusive file saving
+
+Log watch can now save the filtered, retained text shown when clicked as a new UTF-8 snapshot. New incoming lines do not change the chosen snapshot. Editing its inputs, clearing/restarting/stopping, page reconstruction and closure cancel an export before publication; a confirmed earlier publication is reported accurately. Copy and save share one compact, aligned action row. [Behavior and limits](../cross-platform/docs/LOG-WATCH.md).
+
+Screenshot/QR PNGs and portable checksum lists now use a shared native no-replace publisher. This removes the Unix runtime's destination-check/ordinary-rename overwrite window. A system call reporting failure after a successful publication is resolved using file identity and full content; an unconfirmed result retains evidence and reports inspection paths, including in local diagnostics after the window closes. The Windows shared checksum helper remains C# 5 compatible, while portable callers explicitly provide the safe publisher. Hash export now also cancels pending writes after edits, recalculation, navigation and appearance changes. [Save semantics](../cross-platform/docs/NEW-FILE-SAVING.md).
+
+Controlled tests found and fixed two UI problems: a theme rebuild computed the log save button's state before its new visual tree attached, leaving it disabled after mounting; and a long pin save diagnostic extended to 345 DIPs in a 190-DIP-high window. The log editor now refreshes on attachment, and the pin message has a bounded, scrollable viewport. An isolated real-control probe also reproduced the old pin's incorrect generic “Save failed” response to an uncertain publication. Original failures and corrected results remain recorded.
+
+This seventh batch passed eight related Windows suites with unchanged source/assembly hashes and no automatic retries, including 182 checksum-export checks and GNU interoperability. Two complete preview rounds passed with unchanged inputs and zero warnings: 4,416 general layouts, 61,056 action-caption checks, 192 populated log-export layouts and 96 long pin-diagnostic layouts. Each round includes 51 publisher checks, 573 publication UI assertions, 1,141 log-export assertions and 3,487 existing log UI checks, alongside the existing suites. Windows native transparent-hit testing remains blocked by a freshly observed lock screen; the local WSL registration has no usable Ubuntu filesystem, so native Mac/Ubuntu verification remains outstanding.
+
 ## Portable workspaces and scene recovery
 
 The preview now has a Workspaces tool: save website, folder and program shortcuts, group them into a scene, optionally select two compact widgets, and launch the saved group. Each program argument has its own literal field. Results distinguish hand-off, failure, skipped items and unconfirmed requests. Cancellation skips remaining launches without closing opened applications. Saved scenes and unsaved editor drafts are kept separate. See [usage, limits and platform behavior](../cross-platform/docs/WORKSPACES.md).
@@ -80,6 +90,14 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 - Full logs, first-failure evidence and source hashes remain in ignored local diagnostic directories. Generated executables and packages are not included in source commits.
 
 ## 中文说明
+
+第七批新增日志“另存显示内容”：把点击时全部筛选后的保留文字保存为新的 UTF-8 快照，之后新增日志不改变该次快照。编辑输入、清除、重新开始、停止、页面重建或关闭会取消尚未发布的导出；已实际发布则明确报告先前快照已保存。复制与另存按钮保持紧凑、等宽对齐。
+
+截图／二维码 PNG 和跨平台校验清单改为共用原生不覆盖发布器，修复 Unix 运行时先检查目标再普通重命名的并发覆盖窗口。系统调用报错但实际已发布时核验身份与完整内容；结果不明时保留证据和核对路径，窗口关闭后的本机日志也可追溯。Windows 共享校验代码保持 C# 5 兼容；校验导出新增输入、重新计算、切页及语言／主题变化后的后台取消。
+
+实控件测试定位并修复：主题重建时日志按钮在新界面尚未挂载前被禁用、挂载后未刷新；以及 190 高度的钉屏中长提示伸至 345 位置，超出底边。前者改为挂载时刷新，后者增加有界滚动提示区。旧钉屏把未知保存结果一律显示“保存失败”的行为也已在隔离源码副本中复现；原始失败记录均保留。
+
+最终通过 8 套相关 Windows 回归，包含 182 项校验导出检查和 GNU 工具互操作，无自动复跑、输入哈希不变。跨平台连续两轮完整回归通过、编译零警告：4,416 个常规布局、61,056 项按钮文字检查、192 个填充日志导出布局、96 个长提示钉屏布局；每轮包含 51 项发布器检查、573 项保存 UI 断言、1,141 项日志导出断言和 3,487 项原有日志 UI 检查。最新桌面探测仍被锁屏遮挡，本机遗留 WSL 注册项没有可用 Ubuntu 文件系统；Windows 原生透明点击和 Mac／Ubuntu 实机验证未标记完成。
 
 跨平台开发版新增“工作场景”：保存网页、目录和软件入口，组合启动，并可联动两个收起组件。每个软件参数独立输入，保留空值、引号和换行。逐项显示交接、失败、跳过或未确认结果；取消只跳过剩余请求，不终止已打开软件。启动使用已保存内容，未保存草稿保持独立。详见 [操作与限制](../cross-platform/docs/WORKSPACES.md#简体中文)。
 

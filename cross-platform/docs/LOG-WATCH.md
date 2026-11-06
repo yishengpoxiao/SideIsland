@@ -14,7 +14,11 @@ UTF-8 (with or without BOM) and BOM-marked UTF-16 / UTF-32 are supported. File i
 - Alerts: only newly read matching content, at most once every 10 seconds; historical tail after startup, rotation or truncation does not alert. This is a bounded monitor, not a lossless log or alert delivery service.
 - Filter only changes displayed/copyable lines; it does not change the keyword rules. Follow latest can be disabled while inspecting earlier retained content.
 
-Alerts use the local Side Island notification source and respect its disabled setting. Notification body history is saved only when explicitly enabled in notification settings. Log contents and the active target are held in memory; starting a watch does not upload the file or its contents.
+**Save shown** exports all filtered, retained lines displayed in the text area as a new UTF-8 file without a BOM. It captures the text when clicked, so new log lines arriving while the picker is open do not change that snapshot. It does not export the whole source file, and does not replace existing files. The source path remains protected even if the source disappears before saving. Line breaks match the displayed text.
+
+Editing the path, filter or keywords, clearing/restarting/stopping, rebuilding the page or closing cancels any export not yet committed. A delayed picker cannot save an obsolete selection. If publication has already completed, the app reports the earlier saved snapshot instead of calling it cancelled. Unknown save results retain their destination/recovery paths in the local diagnostic log; inspect them before retrying. [New-file publication behavior](NEW-FILE-SAVING.md).
+
+Alerts use the local Side Island notification source and respect its disabled setting. Notification body history is saved only when explicitly enabled in notification settings. Log contents and the active target are held in memory unless you explicitly copy or save a snapshot; starting a watch does not upload the file or its contents.
 
 Windows-hosted tests exercise real temporary files, encodings, rotation/truncation, bounded reads and controlled delayed callbacks; actual Avalonia controls are exercised across languages, themes, sizes and headless DPI. Native Mac / Ubuntu filesystem, permission and window-manager verification remains outstanding.
 
@@ -32,4 +36,8 @@ Windows-hosted tests exercise real temporary files, encodings, rotation/truncati
 
 只对新读取的匹配内容提醒，每 10 秒最多一次；启动、轮换或截断后的历史不提醒。筛选只影响显示和复制，跟随最新可关闭。此功能有明确容量和提醒频率限制，不保证日志或提醒完整保留。
 
-提醒使用岛内 Side Island 通知来源，遵守禁用规则；只有主动开启通知正文历史后才保存提醒正文。当前日志内容和目标仅在内存中，不上传。真实 Mac／Ubuntu 权限、文件系统和桌面行为仍需目标机器验证。
+“另存显示内容”把点击时文本区全部筛选后的保留内容写为新的 UTF-8 无 BOM 文件，换行与显示内容一致；不导出整份源文件，也不覆盖已有文件。选择位置期间新增日志不会改变已捕获快照；源文件路径即使随后消失仍受保护。
+
+修改路径、筛选或关键词，清除、重新开始、停止、页面重建或关闭，会取消尚未提交的导出；迟到的选择器不能保存旧选择。如果提交已经完成，界面明确提示先前快照已保存，不会误报取消。无法确认结果时，本机诊断日志保留目标和恢复路径，先核对再重试。详见 [新文件保存行为](NEW-FILE-SAVING.md#中文)。
+
+提醒使用岛内 Side Island 通知来源，遵守禁用规则；只有主动开启通知正文历史后才保存提醒正文。除主动复制／另存快照外，当前日志内容和目标仅在内存中，不上传。真实 Mac／Ubuntu 权限、文件系统和桌面行为仍需目标机器验证。

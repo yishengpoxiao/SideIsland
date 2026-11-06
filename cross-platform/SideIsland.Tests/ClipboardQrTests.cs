@@ -156,7 +156,7 @@ internal static class ClipboardQrTests
         try { ScreenPinImageFiles.PublishNew(cancelled, stream => { stream.Write(png); cancellation.Cancel(); }, cancellation.Token); }
         catch (OperationCanceledException) { rejected = true; }
         Check(rejected && !File.Exists(cancelled), "cancellation after staging a complete PNG suppresses final publication");
-        Check(Directory.GetFiles(System.IO.Path.GetDirectoryName(destination)!, ".side-island-pin-*.tmp").Length == 0, "QR shared publisher removes owned staging files after failed or cancelled writes");
+        Check(Directory.GetFiles(System.IO.Path.GetDirectoryName(destination)!, ".side-island-publish-*.tmp").Length == 0, "QR shared publisher removes owned staging files after failed or cancelled writes");
     }
     private static void QrExistingFile()
     {
