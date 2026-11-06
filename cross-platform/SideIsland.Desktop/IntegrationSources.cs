@@ -22,6 +22,10 @@ internal sealed record IntegrationSources(
     public Func<string, Task<string?>>? ChooseChecksumDestination { get; init; }
     public Func<string, string, CancellationToken, Task>? SaveChecksumManifest { get; init; }
     public Func<string, Task>? WriteChecksumText { get; init; }
+    public Func<string, Task<string?>>? ChooseDiffDestination { get; init; }
+    public Func<string, string, CancellationToken, Task<PortablePatchTarget>>? PrepareDiffPatch { get; init; }
+    public Func<PortablePatchTarget, CancellationToken, Task>? SaveDiffPatch { get; init; }
+    public Func<string, Task>? WriteDiffText { get; init; }
     public Func<Task<IReadOnlyList<string>>>? ChooseBatchChecksumFiles { get; init; }
     public Func<IList<string>, string, string, CancellationToken, IProgress<BatchHashProgress>?, Task<BatchHashResult>>? ComputeBatchChecksums { get; init; }
     public Func<string, Task<string?>>? ChooseBatchChecksumDestination { get; init; }

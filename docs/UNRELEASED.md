@@ -4,6 +4,12 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Patch export lifecycle and replacement protection
+
+Portable diff export now inspects and writes destinations off the UI thread, confirms the observed existing version in a compact card, rejects late picker results and keeps one pending operation across page rebuilds. A cancelled operation cannot misreport a confirmed commit. Retained or uncertain versions have explicit path feedback and diagnostics. [Behavior and limits / 使用与限制](../cross-platform/docs/PATCH-EXPORT.md).
+
+Real owned-file baselines captured stale comparison bytes being written after an input edit and external target changes being overwritten. A second real-control failure showed a detached confirmation button resolving a different page's confirmation; controls now check their originating view. The corrected targeted run passed 41 patch backend checks and 1,617 actual-control assertions, including 96 populated bilingual theme/size/scaling layouts. The independently committed state-file cancellation change passed 26 checks alongside the 109 preference checks. First failures remain in the local evidence records.
+
 ## Batch checksum verification
 
 The preview checksum tool now offers a compact batch mode for up to 200 files, sequential SHA-256/SHA-512 calculation, exact GNU/BSD manifest matching, per-file errors, cancellation with retained results and combined manifest copy/save. Source paths remain protected even if a file disappears after calculation. Duplicate basenames cannot produce a misleading combined manifest. [Behavior and limits / 使用与限制](../cross-platform/docs/BATCH-CHECKSUMS.md).
