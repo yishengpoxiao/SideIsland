@@ -26,6 +26,18 @@ public sealed class Preferences
     public bool MediaEnabled { get; set; }
     public string Notes { get; set; } = "";
     public string LastTool { get; set; } = "focus";
+    // Current preference fields are value types and immutable strings.
+    public Preferences Copy() => (Preferences)MemberwiseClone();
+    public void CopyFrom(Preferences value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Language = value.Language; LightTheme = value.LightTheme; Dock = value.Dock; PreferNotch = value.PreferNotch;
+        HoverExpand = value.HoverExpand; HoverDelayMs = value.HoverDelayMs; AlwaysOnTop = value.AlwaysOnTop;
+        AcrossSpaces = value.AcrossSpaces; OverFullscreen = value.OverFullscreen; ExpandedWidth = value.ExpandedWidth;
+        ExpandedHeight = value.ExpandedHeight; AlongEdge = value.AlongEdge; FocusMinutes = value.FocusMinutes;
+        Slot1 = value.Slot1; Slot2 = value.Slot2; CodexPath = value.CodexPath; CodexHome = value.CodexHome;
+        CodexEnabled = value.CodexEnabled; MediaEnabled = value.MediaEnabled; Notes = value.Notes; LastTool = value.LastTool;
+    }
     public void Normalize()
     {
         Language = Language == "en" ? "en" : "zh";
@@ -49,53 +61,49 @@ public sealed class PreferenceStore
     // accepts 60,000 code units, so the previous 256 KiB read limit rejected
     // valid Chinese and emoji notes written by this store itself.
     private const int MaximumBytes = 1024 * 1024;
-    private bool unreadable;
+    private readonly PortableStateFile state;
     public string DirectoryPath { get; }
     public string FilePath => Path.Combine(DirectoryPath, "preferences.json");
+    public StateFileStatus PersistenceStatus => state.Status;
     public PreferenceStore(string? explicitDirectory = null)
+        : this(explicitDirectory, null) { }
+    internal PreferenceStore(string? explicitDirectory, PortableStateFile? stateFile)
     {
-        DirectoryPath = explicitDirectory ?? Environment.GetEnvironmentVariable("SIDE_ISLAND_DATA_DIR") ??
+        DirectoryPath = Path.GetFullPath(explicitDirectory ?? Environment.GetEnvironmentVariable("SIDE_ISLAND_DATA_DIR") ??
             (OperatingSystem.IsMacOS() ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "SideIsland") :
              OperatingSystem.IsLinux() ? Path.Combine(Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"), "side-island") :
-             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideIsland.PortablePreview"));
+             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideIsland.PortablePreview")));
+        state = stateFile ?? new PortableStateFile(FilePath, MaximumBytes);
+        if (!StringComparer.Ordinal.Equals(Path.GetFullPath(state.FilePath), Path.GetFullPath(FilePath))) throw new ArgumentException("The supplied state file does not belong to this preference store.", nameof(stateFile));
     }
-    public Preferences Load()
+    public Preferences Load() => state.Load(Decode, () => new Preferences());
+    public Preferences Reload(Preferences current)
     {
-        try
-        {
-            if (!File.Exists(FilePath)) return new();
-            using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > MaximumBytes) throw new InvalidDataException("Preferences exceed 1 MiB.");
-            var value = JsonSerializer.Deserialize<Preferences>(stream) ?? throw new JsonException("Invalid preferences.");
-            value.Normalize(); unreadable = false; return value;
-        }
-        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException)
-        { unreadable = true; return new(); }
+        ArgumentNullException.ThrowIfNull(current);
+        return state.Load(Decode, () => current, () => new Preferences());
     }
-    public void Save(Preferences value)
+    public void MarkDirty() => state.MarkDirty();
+    public void Save(Preferences value) => Save(value, false);
+    public void RecoverAndSave(Preferences value) => Save(value, true);
+    private void Save(Preferences value, bool recovery)
     {
         ArgumentNullException.ThrowIfNull(value);
-        value.Normalize();
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions { WriteIndented = true });
-        // Never replace a usable file with data that the next startup rejects.
-        if (bytes.Length > MaximumBytes) throw new InvalidDataException("Preferences exceed 1 MiB; previous saved preferences have been retained.");
-        Directory.CreateDirectory(DirectoryPath);
-        var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            if (unreadable && File.Exists(FilePath))
-            {
-                File.Copy(FilePath, FilePath + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak");
-                unreadable = false;
-            }
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
-            File.Move(temporary, FilePath, true);
+            var copy = value.Copy(); copy.Normalize();
+            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(copy, new JsonSerializerOptions { WriteIndented = true });
+            if (!state.IsLoaded) Load();
+            if (recovery) state.RecoverAndSave(bytes); else state.Save(bytes);
         }
-        finally
+        catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException)
         {
-            try { if (File.Exists(temporary)) File.Delete(temporary); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            state.ReportFailure(StateFileProblemCode.InvalidData, error.Message);
+            throw new StateFileException(StateFileProblemCode.InvalidData, FilePath, "Preferences could not be serialized; the current draft and original file were retained.", error);
         }
+    }
+    private static Preferences Decode(byte[] bytes)
+    {
+        var value = JsonSerializer.Deserialize<Preferences>(bytes) ?? throw new JsonException("Invalid preferences.");
+        value.Normalize(); return value;
     }
 }

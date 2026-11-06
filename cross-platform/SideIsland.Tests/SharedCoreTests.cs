@@ -38,11 +38,13 @@ internal static class SharedCoreTests
                 Check(restored.Dock == "Auto", "undefined dock values cannot reach native placement");
             }
             byte[] previous = File.ReadAllBytes(store.FilePath); prefs.CodexPath = new string('x', 1024 * 1024 + 1);
-            bool rejected = false; try { store.Save(prefs); } catch (InvalidDataException) { rejected = true; }
+            bool rejected = false; try { store.Save(prefs); } catch (StateFileException saveError) when (saveError.Code == StateFileProblemCode.FileTooLarge) { rejected = true; }
             Check(rejected && File.ReadAllBytes(store.FilePath).SequenceEqual(previous), "oversized save preserves the last usable file");
             const string malformed = "{\"Notes\":\"recoverable original\", BROKEN";
             File.WriteAllText(store.FilePath, malformed); var recovery = new PreferenceStore(folder); var defaults = recovery.Load();
-            recovery.Save(defaults); recovery.Save(defaults);
+            rejected = false; try { recovery.Save(defaults); } catch (StateFileException recoveryError) when (recoveryError.Code == StateFileProblemCode.LoadFailed) { rejected = true; }
+            Check(rejected && File.ReadAllText(store.FilePath) == malformed && recovery.PersistenceStatus.CanRecover, "automatic save retains unreadable preferences until explicit recovery");
+            recovery.RecoverAndSave(defaults); recovery.Save(defaults);
             var backups = Directory.GetFiles(folder, "preferences.json.unreadable-*.bak");
             Check(backups.Length == 1 && File.ReadAllText(backups[0]) == malformed && new PreferenceStore(folder).Load().FocusMinutes == 25, "unreadable preferences preserved exactly once before recovery save");
             Check(Directory.GetFiles(folder, "*.tmp").Length == 0, "preference writes leave no temporary files");

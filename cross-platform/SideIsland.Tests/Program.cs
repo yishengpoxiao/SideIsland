@@ -9,6 +9,11 @@ internal static class Program
     {
         try
         {
+            if (args.Contains("--preferences-only"))
+            {
+                Console.WriteLine("DIAGNOSTIC SELECTION: preference persistence; this is not a complete regression run.");
+                PreferencePersistenceTests.Run(); SharedCoreTests.Run(); return 0;
+            }
             if (PortToolTests.TryRunHelper(args, out int helperExit)) return helperExit;
             if (PowerToolTests.TryRunHelper(args, out helperExit)) return helperExit;
             if (WorkspaceLauncherTests.TryRunHelper(args, out helperExit)) return helperExit;
@@ -25,7 +30,7 @@ internal static class Program
             else if (logsOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: logs-only; this is not a complete regression run."); PortableLogTests.Run(); }
             else if (hashOnly) Console.WriteLine("DIAGNOSTIC SELECTION: hash-only; this is not a complete regression run.");
             else if (portsOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: ports-only; this is not a complete regression run."); PortToolTests.Run(); }
-            else if (!uiOnly) { PlacementTests.Run(); SharedCoreTests.Run(); ProviderTests.Run(); PortToolTests.Run(); BatchFileTests.Run(); PortableFilePublicationTests.Run(); NotificationTests.Run(); WatchTests.Run(); PowerToolTests.Run(); PortableLogTests.Run(); PortableWorkspaceTests.Run(); WorkspaceLauncherTests.Run(); }
+            else if (!uiOnly) { PlacementTests.Run(); SharedCoreTests.Run(); PreferencePersistenceTests.Run(); ProviderTests.Run(); PortToolTests.Run(); BatchFileTests.Run(); PortableFilePublicationTests.Run(); NotificationTests.Run(); WatchTests.Run(); PowerToolTests.Run(); PortableLogTests.Run(); PortableWorkspaceTests.Run(); WorkspaceLauncherTests.Run(); }
             else Console.WriteLine("DIAGNOSTIC SELECTION: UI-only; this is not a complete regression run.");
             AppBuilder.Configure<IslandApplication>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia().WithInterFont().SetupWithoutStarting();
             if (publicationBaseline) { PublicationUiTests.RunPinBaseline(); return 0; }
