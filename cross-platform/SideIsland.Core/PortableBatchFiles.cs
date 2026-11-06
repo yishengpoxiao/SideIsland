@@ -57,6 +57,31 @@ public sealed class PortableBatchFiles : IDisposable
         if (!stat.Regular) throw new IOException("The selected path is not a regular file.");
         return stat.Identity;
     }
+    // Read-only checksum clients reuse the same native identity/timestamp ABI.
+    internal static PortableFileStamp ReadOpenFileStamp(SafeFileHandle handle)
+    {
+        Native.RequireSupported(); var stat = Native.StatHandle(handle);
+        if (!stat.Regular) throw new IOException("The selected path is not a regular file.");
+        return new(stat.Identity, stat.Length, stat.ModifiedSeconds, stat.ModifiedFraction, "");
+    }
+    internal static FileStream OpenRegularReadStream(string path)
+    {
+        Native.RequireSupported();
+        if (!System.IO.Path.IsPathFullyQualified(path)) throw new ArgumentException("An absolute file path is required.");
+        if (OperatingSystem.IsWindows())
+        {
+            if ((File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) throw new IOException("Choose an ordinary file, not a directory or symbolic link.");
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
+            try { ReadOpenFileStamp(stream.SafeFileHandle); return stream; } catch { stream.Dispose(); throw; }
+        }
+        // O_NONBLOCK prevents FIFO/device opens from waiting before fstat can
+        // reject them; O_NOFOLLOW rejects a final symbolic-link substitution.
+        int descriptor = Native.open(path, Native.FileFlags);
+        if (descriptor < 0) Native.ThrowLastError();
+        var handle = new SafeFileHandle(new IntPtr(descriptor), true);
+        try { ReadOpenFileStamp(handle); return new FileStream(handle, FileAccess.Read, 65536, false); }
+        catch { handle.Dispose(); throw; }
+    }
     // Reuse the native ABI boundary for atomic configuration commits. There is
     // deliberately no link/copy/ordinary-rename fallback on unsupported filesystems.
     internal static void ExchangeFiles(string left, string right)

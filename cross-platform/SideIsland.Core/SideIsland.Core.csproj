@@ -9,6 +9,7 @@
     <Compile Include="../../src/Shared/TimeTools.cs" Link="Shared/TimeTools.cs"/>
     <Compile Include="../../src/Shared/ConversionTools.cs" Link="Shared/ConversionTools.cs"/>
     <Compile Include="../../src/Shared/FileHashTools.cs" Link="Shared/FileHashTools.cs"/>
+    <Compile Include="../../src/Shared/BatchHashTools.cs" Link="Shared/BatchHashTools.cs"/>
     <Compile Include="../../src/Shared/TaskActivityHub.cs" Link="Shared/TaskActivityHub.cs"/>
     <Compile Include="../../src/Shared/TaskActivityApi.cs" Link="Shared/TaskActivityApi.cs"/>
     <Compile Include="../../src/Shared/RandomTools.cs" Link="Shared/RandomTools.cs"/>
