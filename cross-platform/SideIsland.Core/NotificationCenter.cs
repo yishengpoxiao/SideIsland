@@ -20,6 +20,7 @@ public sealed class NotificationCenter
     private readonly object gate = new();
     private readonly PortableStateFile stateFile;
     private readonly Func<DateTimeOffset> clock;
+    private readonly Action<string, byte[]> publishDraft;
     private readonly List<NotificationItem> messages = new();
     private readonly Dictionary<string, NotificationApplication> applications = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Fingerprint, DateTimeOffset Seen)> nativeSeen = new(StringComparer.Ordinal);
@@ -28,12 +29,14 @@ public sealed class NotificationCenter
     private bool? pendingPersistHistory { get { int value = Volatile.Read(ref pendingHistory); return value < 0 ? null : value == 1; } set { Volatile.Write(ref pendingHistory, value is null ? -1 : value.Value ? 1 : 0); } }
     private string? lastError;
     private string? lastDraftBackupPath;
+    private FilePublicationException? lastDraftBackupFailure;
     public event Action? Changed;
     public NotificationCenter(string storagePath, Func<DateTimeOffset>? clock = null) : this(storagePath, clock, null) { }
-    internal NotificationCenter(string storagePath, Func<DateTimeOffset>? clock, PortableStateFile? persistence)
+    internal NotificationCenter(string storagePath, Func<DateTimeOffset>? clock, PortableStateFile? persistence, Action<string, byte[]>? publishDraft = null)
     {
         stateFile = persistence ?? new PortableStateFile(Path.GetFullPath(storagePath ?? throw new ArgumentNullException(nameof(storagePath))), MaximumBytes);
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
+        this.publishDraft = publishDraft ?? ((destination, bytes) => PortableFilePublication.WriteNew(destination, bytes));
         Reload();
     }
     public IReadOnlyList<NotificationItem> Items { get { lock (gate) return Ordered().ToArray(); } }
@@ -44,6 +47,9 @@ public sealed class NotificationCenter
     // This immutable snapshot never waits behind a notification or filesystem operation.
     public StateFileStatus PersistenceStatus => stateFile.Status;
     public string? LastDraftBackupPath => Volatile.Read(ref lastDraftBackupPath);
+    // Belongs to the latest reload attempt. Kept separate from the readable
+    // state message so callers can show an unconfirmed publication's paths.
+    public FilePublicationException? LastDraftBackupFailure => Volatile.Read(ref lastDraftBackupFailure);
     public string? LastError { get { lock (gate) return lastError; } }
 
     public bool Publish(NotificationInput input)
@@ -168,6 +174,9 @@ public sealed class NotificationCenter
     }
     private bool ReloadLocked(bool backUpUnsaved)
     {
+        // Even a clean reload with no backup may fail while reading. Never let
+        // that result inherit a previous attempt's publication uncertainty.
+        Volatile.Write(ref lastDraftBackupFailure, null);
         if (backUpUnsaved && (stateFile.Status.Dirty || pendingPersistHistory is not null) && !BackUpDraftLocked()) return false;
         // Decode into a separate validated model. A failed explicit reload
         // must keep the current messages, rules, and pending privacy intent.
@@ -202,11 +211,12 @@ public sealed class NotificationCenter
             if (bytes.Length > 8 * MaximumBytes) throw new InvalidDataException("Notification draft exceeds its backup limit.");
             if ((File.GetAttributes(Path.GetDirectoryName(stateFile.FilePath)!) & FileAttributes.ReparsePoint) != 0) throw new IOException("Notification draft storage may not be a symbolic link.");
             string destination = stateFile.FilePath + ".draft-" + Guid.NewGuid().ToString("N") + ".json";
-            PortableFilePublication.WriteNew(destination, bytes);
+            publishDraft(destination, bytes);
             Volatile.Write(ref lastDraftBackupPath, destination); return true;
         }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
         {
+            if (error is FilePublicationException publicationFailure) Volatile.Write(ref lastDraftBackupFailure, publicationFailure);
             string detail = error is FilePublicationException publication && publication.State == FilePublicationState.OutcomeUnknown
                 ? "Notification draft backup could not be confirmed. Inspect: " + publication.TargetPath + (publication.RetainedTemporaryPath is null ? "" : " | " + publication.RetainedTemporaryPath)
                 : "Notification draft backup failed; current edits were retained: " + error.Message;

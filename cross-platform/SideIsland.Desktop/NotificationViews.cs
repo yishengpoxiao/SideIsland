@@ -19,19 +19,30 @@ public sealed partial class IslandWindow
 
     private void EnsureNotifications()
     {
-        if (notificationCenter is not null) return;
-        notificationCenter = new NotificationCenter(Path.Combine(store.DirectoryPath, "notifications.json"));
-        notificationBridge = new NotificationBridge(notificationCenter);
-        notificationCenter.Changed += () => Interlocked.Exchange(ref notificationDirty, 1);
+        if (notificationCenter is not null || notificationDataBusy) return;
+        AttachNotificationData(CreateNotificationData());
+    }
+    private NotificationCenter CreateNotificationData()
+    {
+        string location = Path.Combine(store.DirectoryPath, "notifications.json");
+        return integrations.CreateNotificationData?.Invoke(location) ?? new NotificationCenter(location);
+    }
+    private void AttachNotificationData(NotificationCenter center)
+    {
+        notificationCenter = center;
+        notificationBridge = new NotificationBridge(center);
+        center.Changed += () => Interlocked.Exchange(ref notificationDirty, 1);
         notificationBridge.Changed += () => Dispatcher.UIThread.Post(() => { if (!closing) Report(notificationBridge.Status); });
     }
     private void DisposeNotifications() { notificationBridge?.Dispose(); notificationCenter?.Save(); }
     private void PublishInternalNotification(string title, string message)
     {
+        if (notificationDataBusy) { QueueDataNotification(title, message); return; }
         EnsureNotifications(); notificationCenter!.Publish(new("side-island", "Side Island", title, message, DateTimeOffset.UtcNow, Internal: true));
     }
     private void RenderNotificationCenter()
     {
+        if (RenderNotificationDataBusy()) return;
         EnsureNotifications();
         body.Children.Add(Hint(T("已接入来源的消息与岛内提醒。读取范围取决于系统接口；通知接入在工具中主动开启。", "Messages from connected sources and island reminders. System access determines coverage; enable connections explicitly.")));
         notificationSummary = Text("", 16); body.Children.Add(notificationSummary);
@@ -45,7 +56,7 @@ public sealed partial class IslandWindow
     }
     private void RefreshNotificationRows()
     {
-        if (notificationRows is null || notificationCenter is null) return;
+        if (notificationDataBusy || notificationRows is null || notificationCenter is null) return;
         notificationRows.Children.Clear();
         var messages = notificationCenter.Filter(notificationFilter).Where(item => notificationSearch.Length == 0 ||
             (item.SourceName + "\n" + item.Title + "\n" + item.Body).Contains(notificationSearch, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -63,6 +74,7 @@ public sealed partial class IslandWindow
     }
     private void RenderNotificationSettings()
     {
+        if (RenderNotificationDataBusy()) return;
         EnsureNotifications(); var center = notificationCenter!; var bridge = notificationBridge!;
         body.Children.Add(Hint(T("读取默认关闭，每次启动由你主动开启。禁用某应用只影响岛内显示，不修改系统通知设置。", "Reading starts off each launch. Disabling an app affects island display and does not change system notification settings.")));
         var sources = new StackPanel { Spacing = 6 };
@@ -100,5 +112,13 @@ public sealed partial class IslandWindow
         }
         if (center.Applications.Count == 0) body.Children.Add(Hint(T("收到来源消息后，可在这里禁用该应用或设置优先级。", "Once an app sends a message, disable it or set its priority here.")));
         body.Children.Add(Button(T("打开消息中心", "Open message center"), () => SelectPage("messages")));
+        body.Children.Add(Button(T("数据状态与恢复", "Data status & recovery"), OpenDataStatus));
+    }
+    private bool RenderNotificationDataBusy()
+    {
+        if (!notificationDataBusy) return false;
+        notificationRows = null; notificationSummary = null;
+        body.Children.Add(Card(Hint(T("通知数据文件正在处理，界面保持可用。完成后会显示最新内容；期间的岛内提醒会有界汇总。", "The notification data file is being processed. The interface stays available; the latest data will appear afterward. Island reminders received meanwhile are summarized with a fixed limit."))));
+        body.Children.Add(Button(T("查看数据状态", "View data status"), OpenDataStatus)); return true;
     }
 }

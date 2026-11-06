@@ -54,7 +54,7 @@ public sealed partial class IslandWindow : Window
     public IslandWindow(bool testMode = false, string? dataDirectory = null) : this(testMode, dataDirectory, null) { }
     internal IslandWindow(bool testMode, string? dataDirectory, IntegrationSources? sources)
     {
-        this.testMode = testMode; store = new(dataDirectory); prefs = store.Load(); selected = prefs.LastTool;
+        this.testMode = testMode; store = sources?.PreferenceData ?? new(dataDirectory); prefs = store.Load(); selected = prefs.LastTool;
         injectedIntegrations = sources is not null;
         integrations = sources ?? new(platform.ReadMediaAsync, platform.ControlMediaAsync, (executable, home) => new CodexQuotaSession(executable, home));
         taskApi = new(tasks);
@@ -75,7 +75,7 @@ public sealed partial class IslandWindow : Window
         Activated += (_, _) => { if (!closing) Place(); };
         PositionChanged += (_, _) => { if (dragging) hover.Stop(); };
         SizeChanged += (_, _) => { if (!placementBusy && expanded && !realNotch && IsVisible) { prefs.ExpandedWidth = Bounds.Width; prefs.ExpandedHeight = Bounds.Height; prefs.Normalize(); QueueSave(); } };
-        Closing += (_, e) => { if (!TryPrepareWorkspaceClose() || !TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); logController.Dispose(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
+        Closing += (_, e) => { if (!TryPrepareDataClose() || !TryPrepareWorkspaceClose() || !TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); logController.Dispose(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
         pulse.Tick += async (_, _) => await TickAsync();
         focus.SetCountdown(TimeSpan.FromMinutes(prefs.FocusMinutes), "Focus", true);
         focus.Completed += () => Notice(T("专注已完成", "Focus completed"), T("休息一下，再开始下一轮。", "Take a break before the next session."));
@@ -91,7 +91,7 @@ public sealed partial class IslandWindow : Window
         ("calculator", "计算器", "Calculator"), ("random", "密码与随机", "Password / random"),
         ("hash", "文件校验", "File checksums"), ("screen-pin", "截图钉屏", "Screenshot pin"), ("batch-files", "批量文件", "Batch files"), ("batch-images", "批量图片", "Batch images"),
         ("notifications", "通知接入与规则", "Notification sources & rules"), ("workspaces", "工作场景", "Workspaces"), ("watch", "任务守望", "Task watch"), ("awake", "保持唤醒", "Keep awake"),
-        ("volume", "系统音量", "System volume"), ("activities", "任务动态", "Task activities"), ("settings", "布局与平台设置", "Layout & platform")
+        ("volume", "系统音量", "System volume"), ("activities", "任务动态", "Task activities"), ("data-status", "数据状态与恢复", "Data status & recovery"), ("settings", "布局与平台设置", "Layout & platform")
     ];
     private string T(string zh, string en) => prefs.Language == "en" ? en : zh;
     private IBrush CardBrush => new SolidColorBrush(prefs.LightTheme ? Color.Parse("#F2F2F7") : Color.Parse("#232326"));
@@ -225,8 +225,23 @@ public sealed partial class IslandWindow : Window
         prefs.Dock = edge.ToString(); prefs.AlongEdge = edge is DockEdge.Left or DockEdge.Right ? (Position.Y + Bounds.Height * screen.Scaling / 2 - area.Y) / area.Height : (Position.X + Bounds.Width * screen.Scaling / 2 - area.X) / area.Width; prefs.Normalize(); Save(); Place();
     }
     private bool PopupOpen() => shell.ContextMenu?.IsOpen == true || picker?.IsDropDownOpen == true;
-    private void Save() { try { store.Save(prefs); } catch (Exception e) { status = T("偏好保存失败：", "Could not save: ") + e.Message; } }
-    private void QueueSave() { saveDebounce.Stop(); saveDebounce.Start(); }
+    private void Save()
+    {
+        MarkPreferenceEdit();
+        if (preferenceDataBusy) { preferenceSaveQueued = true; return; }
+        try { store.Save(prefs.Copy()); ClearPreferenceSaveStatus(); }
+        catch (StateFileException error)
+        {
+            preferenceSaveStatus = T(error.DraftCommitted ? "偏好设置已保存。" : "偏好设置未保存。", error.DraftCommitted ? "Preferences saved. " : "Preferences were not saved. ") + DataStateProblem(error.Code);
+            Report(preferenceSaveStatus); if (!testMode) DiagnosticLog.Write("preferences-save", error);
+        }
+        catch (Exception error)
+        {
+            preferenceSaveStatus = T("偏好设置保存失败，请检查数据状态。", "Could not save preferences. Review data status.");
+            Report(preferenceSaveStatus); if (!testMode) DiagnosticLog.Write("preferences-save", error);
+        }
+    }
+    private void QueueSave() { MarkPreferenceEdit(); saveDebounce.Stop(); if (preferenceDataBusy) preferenceSaveQueued = true; else saveDebounce.Start(); }
     private void Report(string value) { status = value; if (liveStatus is not null) liveStatus.Text = value; }
     private void Notice(string title, string message) { PublishInternalNotification(title, message); if (page == "messages") RefreshNotificationRows(); }
     private string Widget(string key) => key switch
@@ -234,7 +249,7 @@ public sealed partial class IslandWindow : Window
         "clock" => DateTime.Now.ToString("HH:mm"), "focus" => FocusTimer.Format(focus.Value, false) + "\n" + T(focus.IsRunning ? "专注中" : "点击开始", focus.IsRunning ? "Focusing" : "Tap to start"),
         "codex-short" => QuotaValue(false), "codex-week" => QuotaValue(true), "music" => media?.Available == true ? (media.Playing ? "♫ " : "Ⅱ ") + media.Title : T("音乐", "Music"),
         "tasks" => tasks.Current is { } task ? task.Progress.HasValue ? task.Progress.Value.ToString("0") + "%" : "◉ " + task.Title : T("无任务", "No tasks"),
-        "unread" => (notificationCenter?.UnreadCount ?? 0) + "\n" + T("未读消息", "Unread"),
+        "unread" => NotificationUnread() + "\n" + T("未读消息", "Unread"),
         "awake" => awakeUntil > DateTime.UtcNow ? "☕ " + FocusTimer.Format(awakeUntil - DateTime.UtcNow, false) : T("保持唤醒", "Keep awake"), _ => "Side Island"
     };
     private string QuotaValue(bool week)
@@ -252,7 +267,7 @@ public sealed partial class IslandWindow : Window
     }
     private async Task TickAsync()
     {
-        focus.Poll(); RefreshCompact(); if (focusTime is not null) focusTime.Text = FocusTimer.Format(focus.Value, false);
+        focus.Poll(); PollDataNotificationQueue(); RefreshCompact(); if (focusTime is not null) focusTime.Text = FocusTimer.Format(focus.Value, false);
         if (Interlocked.Exchange(ref tasksDirty, 0) != 0 && expanded && selected == "activities") RenderTaskRows();
         if (Interlocked.Exchange(ref notificationDirty, 0) != 0 && expanded && page == "messages") RefreshNotificationRows();
         PollWatches();

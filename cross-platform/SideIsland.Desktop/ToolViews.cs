@@ -39,6 +39,7 @@ public sealed partial class IslandWindow
             case "awake": RenderAwake(); break;
             case "volume": RenderVolume(); break;
             case "activities": RenderActivities(); break;
+            case "data-status": RenderDataStatus(); break;
             default: RenderSettings(); break;
         }
     }

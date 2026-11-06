@@ -11,7 +11,7 @@ internal static class NotificationPersistenceTests
     public static void Run()
     {
         checks = 0; string directory = Path.Combine(Path.GetTempPath(), "side-island-notification-persistence-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
-        try { Conflicts(directory); Recovery(directory); PrivacyIntent(directory); ReloadDraft(directory); BackupReload(directory); CommitWarnings(directory); StatusDoesNotBlock(directory); Bounds(directory); Links(directory); }
+        try { Conflicts(directory); Recovery(directory); PrivacyIntent(directory); ReloadDraft(directory); BackupReload(directory); CommitWarnings(directory); StatusDoesNotBlock(directory); Bounds(directory); Links(directory); DraftPublicationFeedback(directory); DraftFailureBelongsToReload(directory); }
         finally { Directory.Delete(directory, true); }
         Console.WriteLine("PASS: " + checks + " notification persistence checks; exact external/recovery bytes, explicit recovery, pending privacy changes, reload draft retention, committed-warning/unknown states, bounded UTF8 and nonblocking status. Owned files only.");
     }
@@ -129,6 +129,51 @@ internal static class NotificationPersistenceTests
         finally { release.Set(); save.GetAwaiter().GetResult(); }
         Check(!center.PersistenceStatus.Dirty, "pending save settles normally after status read");
     }
+    private static void DraftPublicationFeedback(string directory)
+    {
+        string path = Path.Combine(directory, "draft-unknown.json"); Seed(path);
+        int mode = 0; string? uncertainTarget = null, uncertainStaging = null;
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        var center = new NotificationCenter(path, null, null, (destination, bytes) =>
+        {
+            if (mode == 0)
+            {
+                uncertainTarget = destination; uncertainStaging = destination + ".owned-recovery";
+                File.WriteAllBytes(destination, bytes); File.WriteAllBytes(uncertainStaging, bytes);
+                throw new FilePublicationException(FilePublicationState.OutcomeUnknown, destination, uncertainStaging, "Owned unconfirmed publication fixture");
+            }
+            if (mode == 1)
+            {
+                entered.Set(); if (!release.Wait(5000)) throw new IOException("Owned draft publisher was not released");
+                throw new FilePublicationException(FilePublicationState.NotPublished, destination, null, "Owned confirmed unpublished fixture");
+            }
+            PortableFilePublication.WriteNew(destination, bytes);
+        });
+        const string privateMarker = "RAM_ONLY_UNKNOWN_BACKUP_MARKER_f328a";
+        center.Publish(Input("fixture", privateMarker));
+        var external = new NotificationCenter(path); external.SetApplicationPriority("fixture", 1); byte[] disk = File.ReadAllBytes(path);
+        center.SetApplicationPriority("fixture", 2);
+        Check(!center.Reload(true) && center.PersistenceStatus.Dirty && center.Items.Single().Body == privateMarker && center.Applications.Single().Priority == 2 && Same(path, disk), "unknown draft publication aborts reload and retains exact live message/rules and active file");
+        var diagnostic = center.LastDraftBackupFailure;
+        Check(diagnostic is { State: FilePublicationState.OutcomeUnknown } && diagnostic.TargetPath == uncertainTarget && diagnostic.RetainedTemporaryPath == uncertainStaging, "unknown draft exposes structured target and staging paths without parsing error text");
+        Check(File.Exists(diagnostic!.TargetPath) && File.Exists(diagnostic.RetainedTemporaryPath) && center.LastDraftBackupPath is null, "unconfirmed draft locations are inspectable but never advertised as a confirmed backup");
+        Check(!File.ReadAllText(diagnostic.TargetPath).Contains(privateMarker, StringComparison.Ordinal) && !File.ReadAllText(diagnostic.RetainedTemporaryPath!).Contains(privateMarker, StringComparison.Ordinal), "unconfirmed backup does not silently persist recording-off message bodies");
+
+        mode = 1; Task<bool> nextAttempt = Task.Run(() => center.Reload(true));
+        try
+        {
+            Check(entered.Wait(3000), "next draft publication reaches genuinely blocked publisher");
+            var timer = Stopwatch.StartNew(); var during = center.LastDraftBackupFailure; timer.Stop();
+            Check(during is null && timer.ElapsedMilliseconds < 100 && !release.IsSet, "new backup attempt clears stale uncertainty through a lock-free diagnostic snapshot");
+        }
+        finally { release.Set(); }
+        Check(!nextAttempt.GetAwaiter().GetResult() && center.Items.Single().Body == privateMarker && center.LastDraftBackupPath is null, "confirmed new backup failure leaves live data intact");
+        Check(center.LastDraftBackupFailure is FilePublicationException { State: FilePublicationState.NotPublished }, "confirmed failure is structured separately from unknown publication");
+        mode = 2;
+        Check(center.Reload(true) && center.Applications.Single().Priority == 1 && center.Items.Count == 0 && Same(path, disk), "successful later draft publication permits explicit reload of disk state");
+        Check(center.LastDraftBackupFailure is null && center.LastDraftBackupPath is string saved && saved != uncertainTarget && File.Exists(saved), "successful backup clears stale failure and reports its own confirmed path");
+        Check(File.Exists(uncertainTarget) && File.Exists(uncertainStaging), "later attempts never remove earlier uncertain publication evidence");
+    }
     private static void Bounds(string directory)
     {
         string path=Path.Combine(directory,"bounded.json"); var center=new NotificationCenter(path);
@@ -138,6 +183,26 @@ internal static class NotificationPersistenceTests
         center.Clear(); Check(center.PersistHistory && center.PendingPersistHistory is null && !center.PersistenceStatus.Dirty, "reducing pending history to valid size permits its save");
         string malformed=Path.Combine(directory,"partial-state.json"); File.WriteAllText(malformed,"{\"Version\":1,\"PersistHistory\":false,\"Applications\":[{\"SourceId\":\"good\",\"Name\":\"Good\",\"Enabled\":true,\"Priority\":0},null],\"Items\":[]}");
         var bad=new NotificationCenter(malformed); Check(bad.PersistenceStatus.LoadFailed && bad.Applications.Count==0, "partially decoded invalid application list never reaches live state");
+    }
+    private static void DraftFailureBelongsToReload(string directory)
+    {
+        foreach (bool malformed in new[] { false, true })
+        {
+            string path = Path.Combine(directory, "draft-diagnostic-generation-" + malformed + ".json"); Seed(path); int attempts = 0;
+            var center = new NotificationCenter(path, null, null, (destination, bytes) =>
+            {
+                attempts++; File.WriteAllBytes(destination, bytes);
+                throw new FilePublicationException(FilePublicationState.OutcomeUnknown, destination, null, "Owned earlier unknown backup");
+            });
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) center.SetApplicationPriority("fixture", 2);
+            Check(!center.Reload(true) && center.LastDraftBackupFailure is { State: FilePublicationState.OutcomeUnknown }, "initial unknown diagnostic belongs to failed backup reload");
+            Check(center.RetrySave() && !center.PersistenceStatus.Dirty && center.LastDraftBackupFailure is not null, "retry can save without erasing inspectable earlier backup uncertainty");
+            if (malformed) File.WriteAllText(path, "{owned malformed after successful retry");
+            bool loaded = center.Reload(true);
+            Check(loaded == !malformed && attempts == 1, "clean later reload reads disk without invoking another draft publication");
+            Check(center.LastDraftBackupFailure is null, "later reload does not reuse an earlier backup diagnostic even when the new read fails");
+            Check(center.Applications.Single().Priority == 2 && center.PersistenceStatus.LoadFailed == malformed, "later reload accurately retains the valid rules and reports its own read result");
+        }
     }
     private static void Links(string directory)
     {

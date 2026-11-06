@@ -8,6 +8,7 @@ public sealed partial class IslandWindow
 {
     private void RenderSettings()
     {
+        var dataStatus = Button(T("数据状态与恢复", "Data status & recovery"), OpenDataStatus); dataStatus.Name = "settings-data-status"; body.Children.Add(dataStatus);
         var placement = new StackPanel { Spacing = 6 };
         var edge = new ComboBox { ItemsSource = new[] { T("自动", "Automatic"), T("顶部", "Top"), T("底部", "Bottom"), T("左侧", "Left"), T("右侧", "Right") }, SelectedIndex = prefs.Dock switch { "Top" => 1, "Bottom" => 2, "Left" => 3, "Right" => 4, _ => 0 } };
         placement.Children.Add(Hint(T("停靠边缘", "Dock edge"))); placement.Children.Add(edge);

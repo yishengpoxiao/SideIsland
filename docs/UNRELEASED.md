@@ -4,6 +4,16 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Local data status and explicit recovery
+
+The preview adds a compact Data status tool, also linked from Settings and notification rules. It shows independent preference/notification save states and offers retry, draft backup/reload and explicit damaged-file recovery. Operations run in the background, preserve edits made while pending and invalidate obsolete media/quota connections after an applied reload. Notification draft rescue respects the effective history setting; memory-only messages require an explicit reload acknowledgement. See [data handling and limits](../cross-platform/docs/DATA-RECOVERY.md).
+
+Real-file reproducers captured automatic replacement of unreadable originals on close, external edits being overwritten and recovery state being cleared before a failed commit. The stores now retain exact baselines, require explicit recovery and preserve displaced or unconfirmed versions. Normal verified saves clean their temporary previous versions. A separate compatibility check found and fixed UTF-8 BOM preferences accepted by the old stream reader but rejected by the new byte reader. New-file saving also records confirmed staging paths when Windows sharing locks prevent both publication and cleanup.
+
+The independent backend changes passed 109 preference/state checks, 68 notification persistence checks, the existing shared-core/notification tests and 57 new-file publication checks. Each was committed and synchronized separately after its checks. Native Mac/Ubuntu behavior remains unverified; these results do not replace the outstanding Windows native transparent-hit check.
+
+The final two complete preview rounds passed with unchanged source inputs and zero build warnings: 4,608 general layouts, 64,704 action-caption checks and 192 populated data-status layouts. Each round includes 1,582 data-status assertions, 109 preference/state checks, 89 notification persistence checks and 57 file-publication checks, alongside all existing preview suites. Actual small-window English/light and Chinese/dark renders were reviewed. First failures captured a late reload erasing unconnected Codex input and a confirmed successful recovery retaining an old “not saved” footer; both are now covered. Notification reminders arriving during summary publication are drained before releasing the pending guard. Unconfirmed draft publication paths are also retained in background diagnostic logging; tests do not write to the user's real diagnostic file.
+
 ## Log snapshot export and exclusive file saving
 
 Log watch can now save the filtered, retained text shown when clicked as a new UTF-8 snapshot. New incoming lines do not change the chosen snapshot. Editing its inputs, clearing/restarting/stopping, page reconstruction and closure cancel an export before publication; a confirmed earlier publication is reported accurately. Copy and save share one compact, aligned action row. [Behavior and limits](../cross-platform/docs/LOG-WATCH.md).
@@ -90,6 +100,14 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 - Full logs, first-failure evidence and source hashes remain in ignored local diagnostic directories. Generated executables and packages are not included in source commits.
 
 ## 中文说明
+
+跨平台开发版新增紧凑的“数据状态”工具，设置与通知规则页也提供入口。可分别查看设置／通知的保存状态，重试保存、备份修改后重载，或明确备份坏文件后恢复。后台操作保留等待期间新增的编辑，应用重载设置时使旧媒体／额度请求失效。通知草稿遵循实际生效的历史开关，仅内存消息的重载会要求确认。详见 [数据恢复与范围](../cross-platform/docs/DATA-RECOVERY.md#简体中文)。
+
+真实文件复现了退出时默认值覆盖坏原件、外部修改被覆盖，以及恢复提交失败前过早清除状态的问题。新实现保留完整基线、显式恢复，并保存并发版本或无法确认结果的副本；普通成功保存清理已核验的旧临时版本。另修复带 UTF-8 BOM 的设置兼容回归，以及共享锁同时阻止新文件发布和清理时缺少残留路径的诊断。
+
+后端各独立改动分别通过相关检查并提交同步：109 项设置／状态检查、68 项通知持久化检查、原有共享核心／通知测试和 57 项新文件发布检查。Mac／Ubuntu 原生验证仍待完成；这些检查不替代 Windows 原生透明点击的待补项。
+
+最终连续两轮跨平台完整回归通过，源码输入未变化，构建零警告：4,608 组常规布局、64,704 项按钮文字检查、192 个填充数据状态布局；每轮包含 1,582 项数据状态断言、109 项设置检查、89 项通知持久化检查和 57 项文件发布检查，并运行原有全部预览测试。已查看英文亮色小窗口与中文暗色实际渲染图。首败记录定位并修复了迟到重载覆盖未连接的 Codex 输入，以及真实恢复成功后残留“未保存”提示；通知汇总期间新到的提醒会在释放操作状态前继续排空，未知草稿发布路径也写入后台诊断。测试没有向用户真实诊断文件写入内容。
 
 第七批新增日志“另存显示内容”：把点击时全部筛选后的保留文字保存为新的 UTF-8 快照，之后新增日志不改变该次快照。编辑输入、清除、重新开始、停止、页面重建或关闭会取消尚未发布的导出；已实际发布则明确报告先前快照已保存。复制与另存按钮保持紧凑、等宽对齐。
 

@@ -14,6 +14,9 @@ internal sealed record IntegrationSources(
     Func<string, CancellationToken, Task<string?>> ControlMedia,
     Func<string, string, IQuotaSession> CreateQuota)
 {
+    public PreferenceStore? PreferenceData { get; init; }
+    public Func<string, NotificationCenter>? CreateNotificationData { get; init; }
+    public Func<string, Task>? BeforeDataOperation { get; init; }
     public Func<int[], CancellationToken, Task<PortQuerySnapshot>>? ReadPorts { get; init; }
     public Func<string, Task>? WritePortReport { get; init; }
     public Func<string, Task<string?>>? ChooseChecksumDestination { get; init; }
