@@ -9,6 +9,7 @@ namespace CodexIsland
     {
         public static void Run()
         {
+            SettingsRecoveryTests.Run();
             string directory = Path.Combine(Path.GetTempPath(), "CodexIslandSupportTests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             string previousOverride = Environment.GetEnvironmentVariable("CODEX_ISLAND_DATA_DIR");

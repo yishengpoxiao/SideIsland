@@ -65,17 +65,6 @@ public sealed partial class IslandWindow
         var home = Input("codex-home", prefs.CodexHome); home.PlaceholderText = "CODEX_HOME"; body.Children.Add(executable); body.Children.Add(home);
         body.Children.Add(Actions(AsyncButton(T("连接 / 刷新", "Connect / refresh"), () => ConnectQuota(executable.Text ?? "", home.Text ?? "")), Button(T("断开", "Disconnect"), DisconnectQuota)));
     }
-    private void RenderPorts()
-    {
-        var input = Input("ports", "3000, 8080"); var results = new StackPanel { Spacing = 6 }; body.Children.Add(input);
-        body.Children.Add(AsyncButton(T("查看占用程序", "Find owners"), async () => {
-            var ports = (input.Text ?? "").Split([',', '，', ' ', ';'], StringSplitOptions.RemoveEmptyEntries).Select(s => int.Parse(s, CultureInfo.InvariantCulture)).Distinct().ToArray();
-            if (ports.Length is < 1 or > 32 || ports.Any(p => p is < 1 or > 65535)) throw new ArgumentException(T("输入 1—65535 的端口，最多 32 个。", "Enter up to 32 ports between 1 and 65535."));
-            var items = testMode ? [] : await platform.ReadPortsAsync(ports, lifetime.Token); results.Children.Clear();
-            foreach (var item in items) results.Children.Add(Card(new StackPanel { Spacing = 3, Children = { Text(item.Port + " · " + item.Protocol + " · " + item.Name, 14), Hint("PID " + (item.Pid?.ToString() ?? "—")), Hint(item.Path) } }));
-            if (items.Count == 0) results.Children.Add(Hint(T("未发现可读取的占用记录。", "No readable owner records found.")));
-        })); body.Children.Add(results); body.Children.Add(Hint(T("Mac 使用 lsof，Ubuntu 使用 ss；受保护进程可能无法读取 PID 或程序路径。", "Uses lsof on Mac and ss on Ubuntu. Protected process IDs or executable paths may be unavailable.")));
-    }
     private void RenderNotes()
     {
         var notes = Input("notes", prefs.Notes, true); notes.MinHeight = 250; notes.MaxLength = 60000; notes.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty && !closing) { prefs.Notes = notes.Text ?? ""; QueueSave(); } }; body.Children.Add(notes);
@@ -110,33 +99,6 @@ public sealed partial class IslandWindow
     {
         var length = new NumericUpDown { Minimum = 8, Maximum = 128, Value = 20, FormatString = "0" }; var result = Input("random-result", "", true); result.IsReadOnly = true; body.Children.Add(Hint(T("密码长度", "Password length"))); body.Children.Add(length);
         body.Children.Add(Actions(Button(T("生成密码", "Generate password"), () => result.Text = RandomTools.Password(new PasswordOptions { Length = (int)(length.Value ?? 20), Uppercase = true, Lowercase = true, Digits = true, Symbols = true })), AsyncButton(T("复制", "Copy"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(result.Text ?? ""); }))); body.Children.Add(result);
-    }
-    private readonly List<(string Id, string Target, bool Process, int Pid, DateTime? Start)> watches = new();
-    private readonly HashSet<string> watchedDone = new();
-    private void RenderWatch()
-    {
-        var path = Input("watch-file"); var pid = Input("watch-pid"); body.Children.Add(Hint(T("等待文件出现：绝对路径", "Wait for a file: absolute path"))); body.Children.Add(path);
-        body.Children.Add(Button(T("守望文件", "Watch file"), () => { if (!Path.IsPathFullyQualified(path.Text ?? "")) throw new ArgumentException(T("需要绝对路径。", "An absolute path is required.")); AddWatch(path.Text!, false, 0, null); }));
-        body.Children.Add(Hint(T("等待进程退出：PID", "Wait for a process to exit: PID"))); body.Children.Add(pid);
-        body.Children.Add(Button(T("守望进程", "Watch process"), () => { var id = int.Parse(pid.Text ?? "", CultureInfo.InvariantCulture); using var process = Process.GetProcessById(id); AddWatch(process.ProcessName, true, id, process.StartTime.ToUniversalTime()); }));
-        body.Children.Add(Hint(T("运行期间检查，不会启动或终止目标程序。目标 PID 被复用时仍会视为原进程已经退出。", "Checked while the island runs. Targets are never started or killed; a reused PID counts as the original process exiting.")));
-    }
-    private void AddWatch(string value, bool process, int pid, DateTime? start)
-    {
-        if (watches.Count >= 24) throw new ArgumentException(T("最多同时守望 24 项。", "Up to 24 watches are allowed.")); var id = "watch:" + Guid.NewGuid().ToString("N"); watches.Add((id, value, process, pid, start));
-        tasks.Publish(new() { Id = id, Title = value.Length > 150 ? value[..150] : value, State = "running", Source = T("任务守望", "Task watch") }); Report(T("已开始守望。", "Watch started."));
-    }
-    private DateTime nextWatch;
-    private void PollWatches()
-    {
-        if (testMode || DateTime.UtcNow < nextWatch) return; nextWatch = DateTime.UtcNow.AddSeconds(1);
-        foreach (var item in watches.ToArray())
-        {
-            if (watchedDone.Contains(item.Id)) continue; bool complete;
-            if (!item.Process) complete = File.Exists(item.Target);
-            else try { using var p = Process.GetProcessById(item.Pid); complete = p.HasExited || p.StartTime.ToUniversalTime() != item.Start; } catch (ArgumentException) { complete = true; } catch { continue; }
-            if (!complete) continue; watchedDone.Add(item.Id); tasks.Publish(new() { Id = item.Id, Title = item.Target.Length > 150 ? item.Target[..150] : item.Target, State = "completed", Source = T("任务守望", "Task watch") }); Notice(T("守望已完成", "Watch completed"), item.Target);
-        }
     }
     private void RenderAwake()
     {

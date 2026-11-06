@@ -16,14 +16,13 @@ namespace SideIsland.Desktop.Platforms;
 public sealed record MediaSnapshot(bool Available, string Player, string Title, string Artist,
     string? ArtworkUri, double? PositionSeconds, double? DurationSeconds, bool Playing, string? Error);
 public sealed record VolumeSnapshot(bool Available, int Percent, bool Muted, string? Error);
-public sealed record PortOwner(int Port, string Protocol, int? Pid, string Name, string Path);
 
 /// <summary>
 /// Opt-in desktop integrations. Reading Mac media contacts Apple Music only, and
 /// may show macOS's Automation consent prompt. This class never reads messages,
 /// installs tools, changes OS permissions, or executes a user-provided command.
 /// </summary>
-public sealed class CommandPlatformService : IDisposable
+public sealed partial class CommandPlatformService : IDisposable
 {
     private readonly object gate = new();
     private readonly HashSet<Process> children = new();
@@ -154,32 +153,30 @@ public sealed class CommandPlatformService : IDisposable
         finally { volumeChanges.Release(); }
     }
 
-    public async Task<IReadOnlyList<PortOwner>> ReadPortsAsync(int[] ports, CancellationToken cancellationToken)
+    public async Task<PortQuerySnapshot> ReadPortsAsync(int[] ports, CancellationToken cancellationToken)
     {
         CheckAlive(cancellationToken);
         if (ports is null || ports.Length == 0 || ports.Length > 64 || ports.Any(port => port is < 1 or > 65535))
             throw new ArgumentException("Select between 1 and 64 valid ports (1–65535).", nameof(ports));
         int[] requested = ports.Distinct().Order().ToArray();
-        CommandResult result; List<PortOwner> rows;
+        CommandResult result; string source;
         if (OperatingSystem.IsMacOS())
         {
             string numbers = string.Join(",", requested.Select(port => port.ToString(CultureInfo.InvariantCulture)));
-            result = await RunAsync("lsof", new[] { "-nP", "+c", "0", "-F0pcfnP", "-iTCP:" + numbers, "-iUDP:" + numbers }, cancellationToken, 8000, 512 * 1024);
-            // lsof uses exit 1 for an empty selection, not just for failures.
-            if (!result.Success && !(result.ExitCode == 1 && string.IsNullOrWhiteSpace(result.Output) && string.IsNullOrWhiteSpace(result.Error)))
-                throw new InvalidOperationException(Explain(result, "Socket ownership could not be read."));
-            rows = ParseLsof(result.Output, requested);
+            source = "lsof";
+            result = await RunAsync("lsof", new[] { "-nP", "+c", "0", "-F0pcfnPTt", "-iTCP:" + numbers, "-iUDP:" + numbers }, cancellationToken, 8000, 512 * 1024).ConfigureAwait(false);
         }
         else if (OperatingSystem.IsLinux())
         {
             string filter = "( " + string.Join(" or ", requested.Select(port => "sport = :" + port.ToString(CultureInfo.InvariantCulture))) + " )";
-            result = await RunAsync("ss", new[] { "-H", "-n", "-a", "-t", "-u", "-p", filter }, cancellationToken, 8000, 512 * 1024);
-            if (!result.Success) throw new InvalidOperationException(Explain(result, "Socket ownership could not be read."));
-            rows = ParseSs(result.Output, requested);
+            source = "ss";
+            result = await RunAsync("ss", new[] { "-H", "-n", "-a", "-t", "-u", "-p", filter }, cancellationToken, 8000, 512 * 1024).ConfigureAwait(false);
         }
-        else throw new PlatformNotSupportedException("Port ownership is supported by this adapter on macOS and Linux only.");
-        return rows.DistinctBy(row => (row.Port, row.Protocol, row.Pid, row.Name, row.Path))
-            .OrderBy(row => row.Port).ThenBy(row => row.Protocol, StringComparer.Ordinal).ThenBy(row => row.Pid).ToArray();
+        else return new(requested, DateTimeOffset.UtcNow, "unsupported", [], [new("unsupported", "")]);
+        cancellationToken.ThrowIfCancellationRequested();
+        var observed = DateTimeOffset.UtcNow;
+        var snapshot = await Task.Run(() => ParsePortCommand(source, result.ExitCode, result.Output, result.Error, result.Incomplete, requested, observed, ProcessPath, cancellationToken), cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested(); return snapshot;
     }
 
     public async Task<string?> SetAwakeAsync(bool enabled, TimeSpan duration, CancellationToken cancellationToken)
@@ -257,50 +254,9 @@ public sealed class CommandPlatformService : IDisposable
     }
 
     private static List<PortOwner> ParseSs(string text, int[] requested)
-    {
-        var wanted = requested.ToHashSet(); var rows = new List<PortOwner>();
-        foreach (string line in text.Split('\n'))
-        {
-            string[] columns = Regex.Split(line.Trim(), @"\s+", RegexOptions.CultureInvariant);
-            if (columns.Length < 6 || !(columns[0].StartsWith("tcp", StringComparison.Ordinal) || columns[0].StartsWith("udp", StringComparison.Ordinal))) continue;
-            int? port = EndpointPort(columns[4]); if (port is null || !wanted.Contains(port.Value)) continue;
-            string protocol = columns[0].StartsWith("tcp", StringComparison.Ordinal) ? "TCP" : "UDP";
-            var owners = Regex.Matches(string.Join(" ", columns.Skip(6)), """\("(?<name>(?:[^"\\]|\\.)*)",pid=(?<pid>[0-9]+)""", RegexOptions.CultureInvariant);
-            if (owners.Count == 0) rows.Add(new(port.Value, protocol, null, "Process details unavailable", ""));
-            foreach (Match owner in owners)
-                if (int.TryParse(owner.Groups["pid"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int pid))
-                    rows.Add(new(port.Value, protocol, pid, Clean(owner.Groups["name"].Value.Replace("\\\"", "\""), 256), ProcessPath(pid)));
-        }
-        return rows;
-    }
-
+        => ParseSsRecords(text, requested, new(), ProcessPath);
     private static List<PortOwner> ParseLsof(string text, int[] requested)
-    {
-        var wanted = requested.ToHashSet(); var rows = new List<PortOwner>();
-        int? pid = null; string name = "", endpoint = "", protocol = "";
-        void Flush()
-        {
-            int? port = EndpointPort(endpoint);
-            if (pid.HasValue && port.HasValue && wanted.Contains(port.Value) && protocol is "TCP" or "UDP")
-                rows.Add(new(port.Value, protocol, pid, Clean(name, 256), ProcessPath(pid.Value)));
-            endpoint = protocol = "";
-        }
-        foreach (string raw in text.Split('\0'))
-        {
-            string field = raw.TrimStart('\r', '\n'); if (field.Length < 2) continue;
-            string value = field[1..].TrimEnd('\r', '\n');
-            switch (field[0])
-            {
-                case 'p': Flush(); pid = int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int parsed) ? parsed : null; name = ""; break;
-                case 'c': name = value; break;
-                case 'f': Flush(); break;
-                case 'P': protocol = value.ToUpperInvariant(); break;
-                case 'n': endpoint = value; break;
-            }
-        }
-        Flush(); return rows;
-    }
-
+        => ParseLsofRecords(text, requested, new(), ProcessPath);
     private static int? EndpointPort(string endpoint)
     {
         int peer = endpoint.IndexOf("->", StringComparison.Ordinal); if (peer >= 0) endpoint = endpoint[..peer];
@@ -324,10 +280,15 @@ public sealed class CommandPlatformService : IDisposable
     }
     [DllImport("/usr/lib/libproc.dylib", SetLastError = true)] private static extern int proc_pidpath(int pid, [Out] byte[] buffer, uint bufferSize);
 
-    private async Task<CommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken, int timeoutMilliseconds = 6000, int maximumCharacters = 128 * 1024)
+    private Task<CommandResult> RunAsync(string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken, int timeoutMilliseconds = 6000, int maximumCharacters = 128 * 1024)
     {
         CheckAlive(cancellationToken);
-        string? path = FindCommand(command); if (path is null) return new(-1, "", Missing(command));
+        string? path = FindCommand(command); if (path is null) return Task.FromResult(new CommandResult(-1, "", Missing(command)));
+        return RunResolvedAsync(path, command, arguments, cancellationToken, timeoutMilliseconds, maximumCharacters);
+    }
+    private async Task<CommandResult> RunResolvedAsync(string path, string command, IReadOnlyList<string> arguments, CancellationToken cancellationToken, int timeoutMilliseconds, int maximumCharacters)
+    {
+        CheckAlive(cancellationToken);
         using var timeout = new CancellationTokenSource(timeoutMilliseconds);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token, timeout.Token);
         using var process = NewProcess(path, arguments);
@@ -339,14 +300,16 @@ public sealed class CommandPlatformService : IDisposable
         bool timedOut = false;
         try
         {
-            await process.WaitForExitAsync(linked.Token);
+            await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { KillOwned(process); timedOut = timeout.IsCancellationRequested; }
-        finally { await FinishDraining(stdout, stderr); Forget(process); }
+        finally { await FinishDraining(stdout, stderr).ConfigureAwait(false); Forget(process); }
         cancellationToken.ThrowIfCancellationRequested();
         lifetime.Token.ThrowIfCancellationRequested();
-        if (timedOut) return new(-1, "", command + " timed out; only its own helper process was stopped.");
-        if (output.Exceeded || errors.Exceeded) return new(-1, "", command + " exceeded the output limit and was stopped.");
+        if (timedOut) return new(-1, output.Text, errors.Text + "\n" + command + " timed out; only its own helper process was stopped.", true);
+        if (output.Exceeded || errors.Exceeded) return new(-1, output.Text, errors.Text + "\n" + command + " exceeded the output limit and was stopped.", true);
+        if (!stdout.IsCompletedSuccessfully || !stderr.IsCompletedSuccessfully || output.Failed || errors.Failed)
+            return new(-1, output.Text, errors.Text + "\n" + command + " output could not be completely read.", true);
         return new(HasExited(process) ? process.ExitCode : -1, output.Text, errors.Text);
     }
 
@@ -374,22 +337,24 @@ public sealed class CommandPlatformService : IDisposable
         catch (Exception error) when (error is Win32Exception or InvalidOperationException or NotSupportedException) { }
     }
     private static async Task FinishDraining(Task first, Task second)
-    { await Task.WhenAny(Task.WhenAll(first, second), Task.Delay(1500)); }
+    { await Task.WhenAny(Task.WhenAll(first, second), Task.Delay(1500)).ConfigureAwait(false); }
     private static async Task DrainAsync(StreamReader reader, CapturedOutput output, Action overflow)
     {
         try
         {
             var buffer = new char[4096]; int read;
-            while ((read = await reader.ReadAsync(buffer.AsMemory())) > 0)
+            while ((read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
                 if (!output.Append(buffer, read)) overflow();
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException) { }
+        catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException) { output.MarkFailed(); }
     }
     private sealed class CapturedOutput(int limit)
     {
         private readonly object sync = new(); private readonly StringBuilder value = new();
-        private bool exceeded;
+        private bool exceeded, failed;
         public bool Exceeded { get { lock (sync) return exceeded; } }
+        public bool Failed { get { lock (sync) return failed; } }
+        public void MarkFailed() { lock (sync) failed = true; }
         public string Text { get { lock (sync) return value.ToString(); } }
         public bool Append(char[] buffer, int count)
         {
@@ -401,7 +366,7 @@ public sealed class CommandPlatformService : IDisposable
             }
         }
     }
-    private sealed record CommandResult(int ExitCode, string Output, string Error)
+    private sealed record CommandResult(int ExitCode, string Output, string Error, bool Incomplete = false)
     { public bool Success => ExitCode == 0; }
 
     private async Task ObserveAwakeAsync(Process process, Task stdout, Task stderr, CapturedOutput errors)

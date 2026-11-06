@@ -27,7 +27,7 @@ namespace CodexIsland
             focusPanel.FocusCompleted += RestoreCompletedFocusLayout;
             AddTool(navigation, "profiles", layoutProfilePanel);
             BuildAutomaticSceneAndWidgetTools(navigation);
-            diagnosticsPanel = new DiagnosticsPanel(demo, () => "Visible: " + IsVisible + "; expanded: " + expanded + "; dock: " + settings.Side + "; screen present: " + (FormsScreenPresent()) + "; hover: " + settings.HoverExpandEnabled + "/" + settings.HoverDelayMilliseconds + " ms; fullscreen policy: " + desktopPreferences.FullscreenMode + "; avoiding: " + desktopAvoiding + "; bypassed: " + desktopFullscreenBypassed);
+            diagnosticsPanel = new DiagnosticsPanel(demo, () => "Visible: " + IsVisible + "; expanded: " + expanded + "; dock: " + settings.Side + "; screen present: " + (FormsScreenPresent()) + "; hover: " + settings.HoverExpandEnabled + "/" + settings.HoverDelayMilliseconds + " ms; fullscreen policy: " + desktopPreferences.FullscreenMode + "; avoiding: " + desktopAvoiding + "; bypassed: " + desktopFullscreenBypassed + "; settings recovery pending: " + store.LoadFailed);
             AddTool(navigation, "diagnostics", diagnosticsPanel);
             workspaceScenePanel.ConfigureLayouts(() => layoutProfiles.All, ApplyLayoutProfile);
             BuildOcrDropTools(navigation);

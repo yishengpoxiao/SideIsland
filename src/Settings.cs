@@ -56,7 +56,9 @@ namespace CodexIsland
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetCurrentPackageFamilyName(ref uint length, StringBuilder name);
         private readonly object sync = new object();
+        private string recoveryDefaults;
         public string FilePath { get; private set; }
+        public bool LoadFailed { get; private set; }
 
         public SettingsStore(string path = null)
         {
@@ -74,17 +76,30 @@ namespace CodexIsland
         {
             lock (sync)
             {
+                LoadFailed = false; recoveryDefaults = null;
                 try
                 {
                     string json = File.ReadAllText(FilePath, new UTF8Encoding(false, true));
                     object parsed = new JavaScriptSerializer().DeserializeObject(json);
-                    return Validate(parsed as IDictionary<string, object>);
+                    var values = parsed as IDictionary<string, object>;
+                    return values == null ? RecoveryFallback() : Validate(values);
                 }
-                catch (IOException) { return new Settings(); }
-                catch (UnauthorizedAccessException) { return new Settings(); }
-                catch (ArgumentException) { return new Settings(); }
-                catch (InvalidOperationException) { return new Settings(); }
+                catch (FileNotFoundException) { return new Settings(); }
+                catch (DirectoryNotFoundException) { return new Settings(); }
+                catch (IOException) { return RecoveryFallback(); }
+                catch (UnauthorizedAccessException) { return RecoveryFallback(); }
+                catch (ArgumentException) { return RecoveryFallback(); }
+                catch (InvalidOperationException) { return RecoveryFallback(); }
             }
+        }
+
+        private Settings RecoveryFallback()
+        {
+            var serializer = new JavaScriptSerializer();
+            var fallback = Validate(serializer.DeserializeObject(serializer.Serialize(new Settings())) as IDictionary<string, object>);
+            LoadFailed = true;
+            recoveryDefaults = serializer.Serialize(fallback);
+            return fallback;
         }
 
         public void Save(Settings settings)
@@ -114,6 +129,10 @@ namespace CodexIsland
                     { "FocusMinutes", settings.FocusMinutes }, { "AutoMusic", settings.AutoMusic }, { "OnlineLyricsEnabled", settings.OnlineLyricsEnabled }
                 });
                 string json = new JavaScriptSerializer().Serialize(safe);
+                // An ordinary exit saves settings even when the startup read
+                // failed. Unchanged fallback defaults are not a user edit and
+                // must not erase an unreadable (possibly only locked) original.
+                if (LoadFailed && String.Equals(json, recoveryDefaults, StringComparison.Ordinal)) return;
                 string directory = Path.GetDirectoryName(FilePath);
                 Directory.CreateDirectory(directory);
                 string temporaryPath = Path.Combine(directory, ".settings-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -127,9 +146,13 @@ namespace CodexIsland
                         file.Flush(true);
                     }
                     if (File.Exists(FilePath))
-                        File.Replace(temporaryPath, FilePath, null);
+                        // Preserve exactly the bytes displaced by this atomic
+                        // replacement, rather than copying a potentially stale
+                        // original before a separate overwrite.
+                        File.Replace(temporaryPath, FilePath, LoadFailed ? FilePath + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak" : null);
                     else
                         File.Move(temporaryPath, FilePath);
+                    LoadFailed = false; recoveryDefaults = null;
                 }
                 finally
                 {

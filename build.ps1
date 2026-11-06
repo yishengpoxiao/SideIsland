@@ -17,7 +17,7 @@ $metadata = Join-Path $output 'AssemblyVersion.generated.cs'
 $icon = Join-Path $projectRoot 'assets\island.ico'
 if (-not (Test-Path -LiteralPath $icon)) {
     $iconBuilder = Join-Path $output 'IconBuilder.exe'
-    & $compiler /nologo /reference:System.Drawing.dll ('/out:' + $iconBuilder) (Join-Path $projectRoot 'tools\IconBuilder.cs')
+    & $compiler /nologo /utf8output /reference:System.Drawing.dll ('/out:' + $iconBuilder) (Join-Path $projectRoot 'tools\IconBuilder.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Icon build failed.' }
     & $iconBuilder $icon
     if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed.' }
@@ -29,7 +29,7 @@ $references += '/reference:' + (Join-Path $framework 'System.Runtime.dll')
 $references += @('Windows.UI.winmd', 'Windows.Foundation.winmd', 'Windows.ApplicationModel.winmd', 'Windows.Media.winmd', 'Windows.Storage.winmd', 'Windows.Graphics.winmd', 'Windows.Globalization.winmd') | ForEach-Object { '/reference:' + (Join-Path (Join-Path $env:WINDIR 'System32\WinMetadata') $_) }
 $source = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' -File -Recurse | Sort-Object FullName | ForEach-Object FullName) + @($metadata)
 if (-not $CompileTests -or $Test) {
-    $arguments = @('/nologo', '/langversion:5', '/optimize+', '/platform:anycpu', '/target:winexe', ('/win32icon:' + $icon), ('/out:' + (Join-Path $output 'CodexIsland.exe')), ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest'))) + $references + $source
+    $arguments = @('/nologo', '/utf8output', '/langversion:5', '/optimize+', '/platform:anycpu', '/target:winexe', ('/win32icon:' + $icon), ('/out:' + (Join-Path $output 'CodexIsland.exe')), ('/win32manifest:' + (Join-Path $projectRoot 'app.manifest'))) + $references + $source
     & $compiler $arguments
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'CodexIsland.exe.config') -Destination $output -Force
@@ -40,7 +40,7 @@ if ($Test -or $CompileTests) {
     $testOutput = Join-Path $projectRoot '.runtime\tests'
     New-Item -ItemType Directory -Force -Path $testOutput | Out-Null
     $testSource = Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -Filter '*.cs' -File -Recurse | Sort-Object FullName | ForEach-Object FullName
-    $testArguments = @('/nologo', '/langversion:5', '/target:exe', '/main:CodexIsland.NativeTests', ('/out:' + (Join-Path $testOutput 'NativeTests.exe'))) + $references + $source + $testSource
+    $testArguments = @('/nologo', '/utf8output', '/langversion:5', '/target:exe', '/main:CodexIsland.NativeTests', ('/out:' + (Join-Path $testOutput 'NativeTests.exe'))) + $references + $source + $testSource
     & $compiler $testArguments
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     Write-Output ('Compiled tests: ' + (Join-Path $testOutput 'NativeTests.exe'))

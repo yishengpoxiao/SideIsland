@@ -11,7 +11,11 @@ internal interface IQuotaSession : IDisposable
 internal sealed record IntegrationSources(
     Func<CancellationToken, Task<MediaSnapshot>> ReadMedia,
     Func<string, CancellationToken, Task<string?>> ControlMedia,
-    Func<string, string, IQuotaSession> CreateQuota);
+    Func<string, string, IQuotaSession> CreateQuota)
+{
+    public Func<int[], CancellationToken, Task<PortQuerySnapshot>>? ReadPorts { get; init; }
+    public Func<string, Task>? WritePortReport { get; init; }
+}
 
 internal sealed class CodexQuotaSession(string executable, string home) : IQuotaSession
 {
