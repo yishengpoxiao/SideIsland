@@ -28,9 +28,11 @@ internal static class Program
             bool workspaceOnly = args.Contains("--workspace-only");
             bool publicationOnly = args.Contains("--publication-only");
             bool dataStatusOnly = args.Contains("--data-status-only");
+            bool batchHashOnly = args.Contains("--batch-hash-only");
             bool publicationBaseline = args.Contains("--publication-pin-baseline");
             bool uiOnly = args.Contains("--ui-only");
-            if (dataStatusOnly) Console.WriteLine("DIAGNOSTIC SELECTION: data status; this is not a complete regression run.");
+            if (batchHashOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: batch checksums; this is not a complete regression run."); BatchHashTests.Run(); }
+            else if (dataStatusOnly) Console.WriteLine("DIAGNOSTIC SELECTION: data status; this is not a complete regression run.");
             else if (publicationOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: publication; this is not a complete regression run."); PortableFilePublicationTests.Run(); }
             else if (publicationBaseline) Console.WriteLine("DIAGNOSTIC SELECTION: pre-fix pin feedback; this is not a complete regression run.");
             else if (workspaceOnly) { Console.WriteLine("DIAGNOSTIC SELECTION: workspace-only; this is not a complete regression run."); PortableWorkspaceTests.Run(); WorkspaceLauncherTests.Run(); }
@@ -40,6 +42,7 @@ internal static class Program
             else if (!uiOnly) { PlacementTests.Run(); SharedCoreTests.Run(); PreferencePersistenceTests.Run(); ProviderTests.Run(); PortToolTests.Run(); BatchFileTests.Run(); PortableFilePublicationTests.Run(); NotificationTests.Run(); WatchTests.Run(); PowerToolTests.Run(); PortableLogTests.Run(); PortableWorkspaceTests.Run(); WorkspaceLauncherTests.Run(); }
             else Console.WriteLine("DIAGNOSTIC SELECTION: UI-only; this is not a complete regression run.");
             AppBuilder.Configure<IslandApplication>().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia().WithInterFont().SetupWithoutStarting();
+            if (batchHashOnly) { BatchHashUiTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); return 0; }
             if (dataStatusOnly) { DataStateTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); return 0; }
             if (publicationBaseline) { PublicationUiTests.RunPinBaseline(); return 0; }
             if (publicationOnly) { PublicationUiTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); ScreenPinLifecycleTests.Run(); ClipboardQrTests.Run(); HashExportTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); Console.WriteLine("PASS: publication UI diagnostic selection; full regression still required."); return 0; }
@@ -48,6 +51,7 @@ internal static class Program
             if (hashOnly) { HashToolTests.Run(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal))); Console.WriteLine("PASS: hash-only diagnostic selection; full regression still required."); return 0; }
             if (portsOnly) { PortToolTests.RunUi(); Console.WriteLine("PASS: ports-only diagnostic selection; full regression still required."); return 0; }
             string? artifacts = args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal));
+            BatchHashTests.Run();
             IntegrationLifecycleTests.Run();
             MacNotchTests.Run();
             ScreenPinTests.Run();
@@ -56,6 +60,7 @@ internal static class Program
             ClipboardQrTests.Run();
             PublicationUiTests.Run(artifacts);
             HashToolTests.Run(artifacts);
+            BatchHashUiTests.Run(artifacts);
             DiffToolTests.Run();
             PortToolTests.RunUi();
             WatchTests.RunUi();

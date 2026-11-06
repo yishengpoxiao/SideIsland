@@ -4,6 +4,12 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Batch checksum verification
+
+The preview checksum tool now offers a compact batch mode for up to 200 files, sequential SHA-256/SHA-512 calculation, exact GNU/BSD manifest matching, per-file errors, cancellation with retained results and combined manifest copy/save. Source paths remain protected even if a file disappears after calculation. Duplicate basenames cannot produce a misleading combined manifest. [Behavior and limits / 使用与限制](../cross-platform/docs/BATCH-CHECKSUMS.md).
+
+The shared backend passed 68 owned-file/controlled-stream checks and a separate .NET Framework C# 5 build and real-file probe. The preview interface passed 2,118 checks including 96 populated language/theme/size/scaling layouts, late pickers, cancellation, actual publication followed by close/rebuild, and retained-file diagnostics. A layout fixture initially included a hidden progress bar's stale geometry; it now checks visible controls, while the failure evidence is retained. Native macOS/Ubuntu execution is still outstanding.
+
 ## Local data status and explicit recovery
 
 The preview adds a compact Data status tool, also linked from Settings and notification rules. It shows independent preference/notification save states and offers retry, draft backup/reload and explicit damaged-file recovery. Operations run in the background, preserve edits made while pending and invalidate obsolete media/quota connections after an applied reload. Notification draft rescue respects the effective history setting; memory-only messages require an explicit reload acknowledgement. See [data handling and limits](../cross-platform/docs/DATA-RECOVERY.md).

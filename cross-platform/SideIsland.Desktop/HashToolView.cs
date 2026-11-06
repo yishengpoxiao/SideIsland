@@ -13,6 +13,10 @@ public sealed partial class IslandWindow
     internal Task LatestChecksumExport { get; private set; } = Task.CompletedTask;
     private void RenderHash()
     {
+        var singleMode = Button(T("单个文件", "Single file"), () => { batchChecksumMode = false; RenderPage(); }); singleMode.Name = "hash-single-mode"; singleMode.IsEnabled = batchChecksumMode;
+        var batchMode = Button(T("批量校验", "Batch checksums"), () => { batchChecksumMode = true; RenderPage(); }); batchMode.Name = "hash-batch-mode"; batchMode.IsEnabled = !batchChecksumMode;
+        body.Children.Add(Actions(singleMode, batchMode));
+        if (batchChecksumMode) { RenderBatchChecksums(); return; }
         var path = Input("hash-path"); path.Name = "hash-path";
         // Do not truncate a pasted manifest: a later conflicting entry must
         // reach the bounded parser and fail explicitly rather than be hidden.
