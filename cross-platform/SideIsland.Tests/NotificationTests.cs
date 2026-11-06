@@ -18,7 +18,7 @@ internal static class NotificationTests
         Directory.CreateDirectory(directory);
         try
         {
-            StateTests(directory); PersistenceTests(directory); BoundsTests(directory); DbusFixtureTests(); MacClassifierFixtures();
+            StateTests(directory); PersistenceTests(directory); BoundsTests(directory); NotificationPersistenceTests.Run(); DbusFixtureTests(); MacClassifierFixtures();
             HttpFixtureTests(directory).GetAwaiter().GetResult();
             Console.WriteLine("PASS: notification model, persistence, D-Bus image-data fixtures and real localhost HTTP feed using synthetic messages only; macOS AX and Linux desktop notifications were not exercised.");
         }
@@ -73,7 +73,8 @@ internal static class NotificationTests
         Check(!new NotificationCenter(path).Applications.Single().Enabled, "clear and restart retain disabled applications");
         string corrupt = Path.Combine(directory, "corrupt.json"); File.WriteAllText(corrupt, "{invalid JSON fixture");
         var recovered = new NotificationCenter(corrupt); Check(recovered.LastError is not null && recovered.Items.Count == 0, "corrupt state reports load failure");
-        recovered.Save(); Check(recovered.LastError is null && Directory.GetFiles(directory, "corrupt.json.unreadable-*.bak").Length == 1, "corrupt state preserved before recovery save");
+        recovered.Save(); Check(recovered.LastError is not null && File.ReadAllText(corrupt) == "{invalid JSON fixture", "ordinary save cannot replace an unreadable fallback");
+        Check(recovered.RecoverAndSave() && recovered.LastError is null && Directory.GetFiles(directory, "corrupt.json.unreadable-*.bak").Length == 1, "explicit recovery preserves corrupt state before committing current data");
         string malformed = Path.Combine(directory, "malformed.json"); File.WriteAllText(malformed, "{\"Version\":1,\"PersistHistory\":true,\"Applications\":null,\"Items\":[]}");
         Check(new NotificationCenter(malformed).LastError is not null, "null collection rejected without crashing");
         string oversized = Path.Combine(directory, "oversized.json"); File.WriteAllText(oversized, new string(' ', 1024 * 1024 + 1));

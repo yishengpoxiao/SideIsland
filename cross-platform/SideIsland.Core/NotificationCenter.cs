@@ -18,24 +18,32 @@ public sealed class NotificationCenter
     public const int MaximumItems = 200;
     private const int MaximumBytes = 1024 * 1024;
     private readonly object gate = new();
-    private readonly string path;
+    private readonly PortableStateFile stateFile;
     private readonly Func<DateTimeOffset> clock;
     private readonly List<NotificationItem> messages = new();
     private readonly Dictionary<string, NotificationApplication> applications = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Fingerprint, DateTimeOffset Seen)> nativeSeen = new(StringComparer.Ordinal);
-    private bool persistHistory, unreadable;
+    private bool persistHistory;
+    private int pendingHistory = -1;
+    private bool? pendingPersistHistory { get { int value = Volatile.Read(ref pendingHistory); return value < 0 ? null : value == 1; } set { Volatile.Write(ref pendingHistory, value is null ? -1 : value.Value ? 1 : 0); } }
     private string? lastError;
+    private string? lastDraftBackupPath;
     public event Action? Changed;
-    public NotificationCenter(string storagePath, Func<DateTimeOffset>? clock = null)
+    public NotificationCenter(string storagePath, Func<DateTimeOffset>? clock = null) : this(storagePath, clock, null) { }
+    internal NotificationCenter(string storagePath, Func<DateTimeOffset>? clock, PortableStateFile? persistence)
     {
-        path = Path.GetFullPath(storagePath ?? throw new ArgumentNullException(nameof(storagePath)));
+        stateFile = persistence ?? new PortableStateFile(Path.GetFullPath(storagePath ?? throw new ArgumentNullException(nameof(storagePath))), MaximumBytes);
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
-        Load();
+        Reload();
     }
     public IReadOnlyList<NotificationItem> Items { get { lock (gate) return Ordered().ToArray(); } }
     public IReadOnlyList<NotificationApplication> Applications { get { lock (gate) return applications.Values.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray(); } }
     public int UnreadCount { get { lock (gate) return messages.Count(item => !item.Read); } }
     public bool PersistHistory { get { lock (gate) return persistHistory; } }
+    public bool? PendingPersistHistory => pendingPersistHistory;
+    // This immutable snapshot never waits behind a notification or filesystem operation.
+    public StateFileStatus PersistenceStatus => stateFile.Status;
+    public string? LastDraftBackupPath => Volatile.Read(ref lastDraftBackupPath);
     public string? LastError { get { lock (gate) return lastError; } }
 
     public bool Publish(NotificationInput input)
@@ -127,8 +135,21 @@ public sealed class NotificationCenter
     public IReadOnlyList<NotificationItem> Filter(NotificationFilter filter)
     { lock (gate) return Ordered().Where(item => filter == NotificationFilter.All || (filter == NotificationFilter.Unread ? !item.Read : item.Priority >= 1)).ToArray(); }
     public void SetPersistHistory(bool enabled)
-    { lock (gate) { bool previous = persistHistory; persistHistory = enabled; SaveLocked(); if (lastError is not null) persistHistory = previous; } Changed?.Invoke(); }
+    {
+        lock (gate)
+        {
+            pendingPersistHistory = enabled;
+            // A failed enable must not start recording private bodies. A request
+            // to disable takes effect immediately for future automatic writes,
+            // even when removing the previous disk history still needs retry.
+            if (!enabled) persistHistory = false;
+            SaveLocked();
+        }
+        Changed?.Invoke();
+    }
     public void Save() { lock (gate) SaveLocked(); }
+    public bool RetrySave() { bool saved; lock (gate) saved = SaveLocked(); Changed?.Invoke(); return saved; }
+    public bool RecoverAndSave() { bool saved; lock (gate) saved = SaveLocked(true); Changed?.Invoke(); return saved; }
     private IEnumerable<NotificationItem> Ordered() => messages.OrderByDescending(item => item.Priority).ThenByDescending(item => item.UpdatedAt);
     private sealed class Storage
     {
@@ -138,54 +159,99 @@ public sealed class NotificationCenter
         public List<NotificationApplication> Applications { get; set; } = new();
         public List<NotificationItem> Items { get; set; } = new();
     }
-    private void Load()
+    public bool Reload() => Reload(false);
+    public bool Reload(bool backUpUnsaved)
     {
-        lock (gate)
+        bool loaded;
+        lock (gate) loaded = ReloadLocked(backUpUnsaved);
+        Changed?.Invoke(); return loaded;
+    }
+    private bool ReloadLocked(bool backUpUnsaved)
+    {
+        if (backUpUnsaved && (stateFile.Status.Dirty || pendingPersistHistory is not null) && !BackUpDraftLocked()) return false;
+        // Decode into a separate validated model. A failed explicit reload
+        // must keep the current messages, rules, and pending privacy intent.
+        Storage state = stateFile.Load(Decode, () => new Storage());
+        bool loaded = !stateFile.Status.LoadFailed;
+        if (loaded)
         {
-            try
+            applications.Clear(); messages.Clear(); nativeSeen.Clear();
+            foreach (var app in state.Applications) applications.Add(app.SourceId, app);
+            persistHistory = state.PersistHistory; pendingPersistHistory = null;
+            if (persistHistory) foreach (var item in state.Items)
             {
-                if (!File.Exists(path)) return;
-                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Notification state may not be a symbolic link.");
-                if (new FileInfo(path).Length > MaximumBytes) throw new InvalidDataException("Notification state exceeds 1 MiB.");
-                var state = JsonSerializer.Deserialize<Storage>(File.ReadAllText(path)) ?? throw new InvalidDataException("Invalid notification state.");
-                if (state.Version != 1 || state.Applications is null || state.Items is null || state.Applications.Count > 512 || state.Items.Count > MaximumItems) throw new InvalidDataException("Invalid notification state limits.");
-                foreach (var app in state.Applications)
-                {
-                    if (app is null || app.SourceId != Text(app.SourceId, 160, false) || app.SourceId.Length == 0 || app.Name != Text(app.Name, 160, false) || app.Priority is < 0 or > 2 || applications.ContainsKey(app.SourceId)) throw new InvalidDataException("Invalid notification application.");
-                    applications[app.SourceId] = app;
-                }
-                persistHistory = state.PersistHistory;
-                if (persistHistory)
-                    foreach (var item in state.Items)
-                    {
-                        if (item is null || !Guid.TryParseExact(item.Id, "N", out _) || item.Title != Text(item.Title, 512, false) || item.Title.Length == 0 || item.Body != Text(item.Body, 6000, true) || item.SourceId != Text(item.SourceId, 160, false) || item.SourceName != Text(item.SourceName, 160, false) || item.Count is < 1 or > 10000 || item.Priority is < 0 or > 2 || (item.NativeId is not null && (item.NativeId != Text(item.NativeId, 256, false) || item.NativeId.Length == 0)) || item.UpdatedAt < item.CreatedAt || messages.Any(previous => previous.Id == item.Id)) throw new InvalidDataException("Invalid notification item.");
-                        if (!applications.TryGetValue(item.SourceId, out var app) || !app.Enabled) continue;
-                        messages.Add(item with { Priority = app.Priority });
-                        if (item.NativeId is not null) nativeSeen[item.SourceId + "\n" + item.NativeId] = (Fingerprint(item.SourceId, item.Title, item.Body), clock());
-                    }
+                if (!applications.TryGetValue(item.SourceId, out var app) || !app.Enabled) continue;
+                messages.Add(item with { Priority = app.Priority });
+                if (item.NativeId is not null) nativeSeen[item.SourceId + "\n" + item.NativeId] = (Fingerprint(item.SourceId, item.Title, item.Body), clock());
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
-            { applications.Clear(); messages.Clear(); nativeSeen.Clear(); persistHistory = false; unreadable = true; lastError = "Notification state could not be loaded: " + error.Message; }
+            lastError = null;
+        }
+        else lastError = "Notification state could not be loaded; current edits remain in memory: " + stateFile.Status.Message;
+        return loaded;
+    }
+    private bool BackUpDraftLocked()
+    {
+        try
+        {
+            // Backup does not activate a failed opt-in. Pending enablement is
+            // still only an in-memory request until an actual save succeeds.
+            bool history = persistHistory && pendingPersistHistory != false;
+            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new Storage { PersistHistory = history, Applications = applications.Values.ToList(), Items = history ? messages.ToList() : new() });
+            // Draft rescue is not automatically loaded. It also rescues a bounded
+            // in-memory history that is too large for the normal 1 MiB state file.
+            if (bytes.Length > 8 * MaximumBytes) throw new InvalidDataException("Notification draft exceeds its backup limit.");
+            if ((File.GetAttributes(Path.GetDirectoryName(stateFile.FilePath)!) & FileAttributes.ReparsePoint) != 0) throw new IOException("Notification draft storage may not be a symbolic link.");
+            string destination = stateFile.FilePath + ".draft-" + Guid.NewGuid().ToString("N") + ".json";
+            PortableFilePublication.WriteNew(destination, bytes);
+            Volatile.Write(ref lastDraftBackupPath, destination); return true;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            string detail = error is FilePublicationException publication && publication.State == FilePublicationState.OutcomeUnknown
+                ? "Notification draft backup could not be confirmed. Inspect: " + publication.TargetPath + (publication.RetainedTemporaryPath is null ? "" : " | " + publication.RetainedTemporaryPath)
+                : "Notification draft backup failed; current edits were retained: " + error.Message;
+            stateFile.ReportFailure(StateFileProblemCode.Io, detail); lastError = detail; return false;
         }
     }
-    private void SaveLocked()
+    private static Storage Decode(byte[] bytes)
     {
-        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        int offset = bytes.Length >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf ? 3 : 0;
+        string json = new UTF8Encoding(false, true).GetString(bytes, offset, bytes.Length - offset);
+        var state = JsonSerializer.Deserialize<Storage>(json) ?? throw new InvalidDataException("Invalid notification state.");
+        if (state.Version != 1 || state.Applications is null || state.Items is null || state.Applications.Count > 512 || state.Items.Count > MaximumItems) throw new InvalidDataException("Invalid notification state limits.");
+        var sources = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var app in state.Applications)
+            if (app is null || app.SourceId != Text(app.SourceId, 160, false) || app.SourceId.Length == 0 || app.Name != Text(app.Name, 160, false) || app.Priority is < 0 or > 2 || !sources.Add(app.SourceId)) throw new InvalidDataException("Invalid notification application.");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in state.Items)
+            if (item is null || !Guid.TryParseExact(item.Id, "N", out _) || item.Title != Text(item.Title, 512, false) || item.Title.Length == 0 || item.Body != Text(item.Body, 6000, true) || item.SourceId != Text(item.SourceId, 160, false) || item.SourceName != Text(item.SourceName, 160, false) || item.Count is < 1 or > 10000 || item.Priority is < 0 or > 2 || (item.NativeId is not null && (item.NativeId != Text(item.NativeId, 256, false) || item.NativeId.Length == 0)) || item.UpdatedAt < item.CreatedAt || !ids.Add(item.Id)) throw new InvalidDataException("Invalid notification item.");
+        return state;
+    }
+    private bool SaveLocked(bool recover = false)
+    {
+        bool desiredHistory = pendingPersistHistory ?? persistHistory;
         try
         {
             if (applications.Count > 512) throw new InvalidDataException("Notification application limit reached (512).");
-            var state = new Storage { PersistHistory = persistHistory, Applications = applications.Values.ToList(), Items = persistHistory ? messages.ToList() : new() };
+            var state = new Storage { PersistHistory = desiredHistory, Applications = applications.Values.ToList(), Items = desiredHistory ? messages.ToList() : new() };
             byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(state);
-            if (bytes.Length > MaximumBytes) throw new InvalidDataException("Notification history exceeds 1 MiB. Clear messages or turn off saved history.");
-            string directory = Path.GetDirectoryName(path)!; Directory.CreateDirectory(directory);
-            if ((File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) throw new IOException("Notification state may not be a symbolic link.");
-            if (unreadable && File.Exists(path)) { File.Copy(path, path + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak"); unreadable = false; }
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
-            File.Move(temporary, path, true); lastError = null;
+            if (bytes.Length > MaximumBytes)
+            {
+                const string message = "Notification history exceeds 1 MiB. Clear messages or turn off saved history.";
+                stateFile.ReportFailure(StateFileProblemCode.FileTooLarge, message);
+                lastError = "Notification changes remain in memory; saving failed: " + message; return false;
+            }
+            if (recover) stateFile.RecoverAndSave(bytes); else stateFile.Save(bytes);
+            persistHistory = desiredHistory; pendingPersistHistory = null; lastError = null; return true;
+        }
+        catch (StateFileException error)
+        {
+            if (error.DraftCommitted) { persistHistory = desiredHistory; pendingPersistHistory = null; lastError = "Notification changes were saved; verify the reported recovery copy: " + error.Message; return true; }
+            lastError = "Notification changes remain in memory; saving failed: " + error.Message;
         }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
-        { lastError = "Notification changes remain in memory; saving failed: " + error.Message; }
-        finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+        { stateFile.ReportFailure(error is JsonException or ArgumentException or InvalidDataException ? StateFileProblemCode.InvalidData : StateFileProblemCode.Io, error.Message); lastError = "Notification changes remain in memory; saving failed: " + error.Message; }
+        return false;
     }
     private static string Fingerprint(string source, string title, string body) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source + "\n" + title + "\n" + body)));
     private static string Text(string? value, int limit, bool multiline)

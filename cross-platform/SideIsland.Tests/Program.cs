@@ -14,6 +14,11 @@ internal static class Program
                 Console.WriteLine("DIAGNOSTIC SELECTION: preference persistence; this is not a complete regression run.");
                 PreferencePersistenceTests.Run(); SharedCoreTests.Run(); return 0;
             }
+            if (args.Contains("--notification-persistence-only"))
+            {
+                Console.WriteLine("DIAGNOSTIC SELECTION: notification persistence; this is not a complete regression run.");
+                NotificationTests.Run(); return 0;
+            }
             if (PortToolTests.TryRunHelper(args, out int helperExit)) return helperExit;
             if (PowerToolTests.TryRunHelper(args, out helperExit)) return helperExit;
             if (WorkspaceLauncherTests.TryRunHelper(args, out helperExit)) return helperExit;
