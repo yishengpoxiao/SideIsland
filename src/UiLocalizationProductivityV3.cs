@@ -4,6 +4,16 @@ namespace CodexIsland
     {
         private static void ProductivityV3Catalog()
         {
+            Map(@"复制差异|Copy diff
+导出补丁|Export patch
+导出完整差异为 UTF-8 补丁，目标名 text.txt，统一使用 LF 换行；不修改原文。|Export the full diff as a UTF-8 patch for text.txt using LF line endings. Original text stays unchanged.
+已复制完整差异补丁。|Full diff patch copied.
+演示模式不保存文件。|Demo mode does not save files.
+导出差异补丁|Export diff patch
+差异补丁|Diff patch
+差异补丁已保存。|Diff patch saved.
+补丁保存失败，请检查文件权限或选择其他位置。|Could not save the patch. Check permissions or choose another location.
+没有可导出的差异。|There are no changes to export.");
             Map(@"粘贴校验值或 SHA256SUMS / SHA512SUMS 清单，自动匹配所选文件名。|Paste a checksum or SHA256SUMS / SHA512SUMS list to match the selected filename.
 校验清单最多支持 128 Ki 字符和 1,024 行。|Checksum lists support up to 128 Ki characters and 1,024 lines.
 请先选择文件，再匹配校验清单。|Choose a file before matching a checksum list.

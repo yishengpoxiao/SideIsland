@@ -15,7 +15,7 @@ public sealed partial class IslandWindow
         // Do not truncate a pasted manifest: a later conflicting entry must
         // reach the bounded parser and fail explicitly rather than be hidden.
         var expected = new TextBox { Name = "hash-expected", Text = drafts.GetValueOrDefault("hash-expected", ""), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 82, MaxHeight = 180, MaxLength = 0 };
-        expected.TextChanged += (_, _) => drafts["hash-expected"] = expected.Text ?? "";
+        expected.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty) drafts["hash-expected"] = expected.Text ?? ""; };
         var algorithm = new ComboBox { Name = "hash-algorithm", ItemsSource = new[] { "SHA-256", "SHA-512" }, SelectedIndex = drafts.GetValueOrDefault("hash-algorithm") == "SHA512" ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var result = new TextBox { Name = "hash-result", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80 };
         var state = Text(T("选择文件后开始计算。", "Choose a file to begin."), 12); state.Name = "hash-status";
@@ -26,8 +26,7 @@ public sealed partial class IslandWindow
         Button cancel = Button(T("取消", "Cancel"), () => pending?.Cancel()); cancel.Name = "hash-cancel"; cancel.IsEnabled = false;
         void Invalidate()
         {
-            // Avalonia can deliver TextChanged after a click in the same UI
-            // turn. Only a change from the captured inputs invalidates work.
+            // Only changes from the captured inputs invalidate current work.
             if (lastTarget == (path.Text ?? "") && lastExpected == (expected.Text ?? "") && lastAlgorithm == algorithm.SelectedIndex) return;
             lastTarget = path.Text ?? ""; lastExpected = expected.Text ?? ""; lastAlgorithm = algorithm.SelectedIndex;
             revision++; pending?.Cancel(); result.Text = ""; progress.Value = 0;
@@ -83,7 +82,8 @@ public sealed partial class IslandWindow
             if (!closing && !detached && files.Count > 0) path.Text = files[0].TryGetLocalPath() ?? "";
         });
         var copy = AsyncButton(T("复制结果", "Copy result"), async () => { if (Clipboard is not null && !testMode && !string.IsNullOrEmpty(result.Text)) await Clipboard.SetTextAsync(result.Text); }); copy.Name = "hash-copy";
-        path.TextChanged += (_, _) => Invalidate(); expected.TextChanged += (_, _) => Invalidate();
+        path.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty) Invalidate(); };
+        expected.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty) Invalidate(); };
         algorithm.SelectionChanged += (_, _) => { drafts["hash-algorithm"] = algorithm.SelectedIndex == 1 ? "SHA512" : "SHA256"; Invalidate(); };
         content.Children.Add(path); content.Children.Add(Actions(choose, algorithm));
         content.Children.Add(Hint(T("可选：粘贴预期值、SHA256SUMS / SHA512SUMS 或 BSD 校验清单。", "Optional: paste an expected digest, SHA256SUMS / SHA512SUMS, or a BSD checksum list.")));

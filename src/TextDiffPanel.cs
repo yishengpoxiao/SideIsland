@@ -17,6 +17,9 @@ namespace CodexIsland
         private readonly TextBlock status = ToolStyle.Hint("");
         private readonly DispatcherTimer debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private CancellationTokenSource pending;
+        private readonly bool demo;
+        private readonly Button copyPatch, savePatch;
+        internal string UnifiedPatch { get; private set; }
         private int revision;
         private bool disposed, synchronizingScroll;
         internal TextDiffResult LastResult { get; private set; }
@@ -28,6 +31,7 @@ namespace CodexIsland
         }
         public TextDiffPanel(bool demo)
         {
+            this.demo = demo;
             Children.Add(ToolStyle.Heading("文字对照"));
             Children.Add(ToolStyle.Hint("左边放原文，右边放新文本。自动按行对照：绿色新增、红色删除、橙色修改。文本仅在本次运行内存中处理。"));
             left.AcceptsReturn = right.AcceptsReturn = true; left.AcceptsTab = right.AcceptsTab = true;
@@ -40,6 +44,9 @@ namespace CodexIsland
             Children.Add(Pair(Labeled("原文", left), Labeled("新文本", right)));
             var actions = PanelActionLayout.Create(2, IslandWindow.Button("交换左右", () => { string previous = left.Text; left.Text = right.Text; right.Text = previous; }), IslandWindow.Button("清空文本", () => { left.Clear(); right.Clear(); }));
             actions.Margin = new Thickness(0, 6, 0, 0); Children.Add(actions); Children.Add(status);
+            copyPatch = IslandWindow.Button("复制差异", CopyPatch); savePatch = IslandWindow.Button("导出补丁", SavePatch);
+            Children.Add(PanelActionLayout.Create(2, copyPatch, savePatch)); UpdateExport();
+            Children.Add(ToolStyle.Hint("导出完整差异为 UTF-8 补丁，目标名 text.txt，统一使用 LF 换行；不修改原文。"));
             Children.Add(Pair(Labeled("原文差异", leftPreview), Labeled("新文本差异", rightPreview)));
             leftPreview.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((s, e) => SyncScroll(leftPreview, rightPreview, e)));
             rightPreview.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((s, e) => SyncScroll(rightPreview, leftPreview, e)));
@@ -73,19 +80,19 @@ namespace CodexIsland
         private static FlowDocument Document() { return new FlowDocument { PagePadding = new Thickness(0), ColumnWidth = 100000, PageWidth = 100000, FontFamily = new FontFamily("Consolas"), FontSize = 11, LineHeight = 17 }; }
         private void Schedule()
         {
-            if (disposed) return; revision++; if (pending != null) pending.Cancel(); debounce.Stop(); LastResult = null;
+            if (disposed) return; revision++; if (pending != null) pending.Cancel(); debounce.Stop(); LastResult = null; UnifiedPatch = null; UpdateExport();
             leftPreview.Document = Document(); rightPreview.Document = Document(); status.Text = "正在等待输入完成…"; debounce.Start();
         }
         internal async Task CompareNowAsync()
         {
             if (disposed) return; debounce.Stop(); int requested = ++revision;
             if (pending != null) pending.Cancel(); var cancellation = new CancellationTokenSource(); pending = cancellation;
-            string a = left.Text, b = right.Text; status.Text = "正在对照…";
+            string a = left.Text, b = right.Text; LastResult = null; UnifiedPatch = null; UpdateExport(); status.Text = "正在对照…";
             try
             {
-                TextDiffResult result = await Task.Run(() => TextDiff.Compare(a, b, cancellation.Token));
+                var comparison = await Task.Run(() => Tuple.Create(TextDiff.Compare(a, b, cancellation.Token), TextDiff.ExportUnified(a, b, cancellation.Token)));
                 if (disposed || revision != requested || cancellation.IsCancellationRequested) return;
-                LastResult = result; Render(result);
+                TextDiffResult result = comparison.Item1; LastResult = result; UnifiedPatch = comparison.Item2; UpdateExport(); Render(result);
                 status.Text = result.Identical ? "两侧文本一致（忽略换行符格式）。" : String.Format("新增 {0} 行 · 删除 {1} 行 · 修改 {2} 行", result.Added, result.Removed, result.Modified);
                 if (result.Rows.Count > 600) status.Text += " · 完整差异已统计，预览仅显示前 600 行。";
                 if (result.Rows.Take(600).Any(row => (row.Left ?? "").Length > 2000 || (row.Right ?? "").Length > 2000)) status.Text += " · 过长行的预览已截短为 2,000 字符。";
@@ -94,6 +101,26 @@ namespace CodexIsland
             catch (ArgumentException error) { if (!disposed && revision == requested) { status.Text = error.Message; leftPreview.Document = Document(); rightPreview.Document = Document(); } }
             catch (Exception) { if (!disposed && revision == requested) status.Text = "对照暂时失败，请减少文本后重试。"; }
             finally { if (Object.ReferenceEquals(pending, cancellation)) pending = null; cancellation.Dispose(); }
+        }
+        private void UpdateExport() { copyPatch.IsEnabled = savePatch.IsEnabled = !disposed && !String.IsNullOrEmpty(UnifiedPatch); }
+        private void CopyPatch()
+        {
+            if (String.IsNullOrEmpty(UnifiedPatch) || disposed) return;
+            if (demo) { status.Text = "演示模式不修改剪贴板。"; return; }
+            try { Clipboard.SetText(UnifiedPatch); status.Text = "已复制完整差异补丁。"; }
+            catch { status.Text = "剪贴板正忙，请稍后再试。"; }
+        }
+        private void SavePatch()
+        {
+            if (String.IsNullOrEmpty(UnifiedPatch) || disposed) return;
+            if (demo) { status.Text = "演示模式不保存文件。"; return; }
+            // A modal picker pumps messages; capture the explicit export before
+            // it opens so a later comparison cannot change the selected payload.
+            string patch = UnifiedPatch;
+            var dialog = new Microsoft.Win32.SaveFileDialog { Title = UiLocalization.Localize("导出差异补丁"), FileName = "comparison.patch", DefaultExt = ".patch", AddExtension = true, OverwritePrompt = true, Filter = UiLocalization.FileFilter("差异补丁|*.patch;*.diff|所有文件|*.*") };
+            if (dialog.ShowDialog(Window.GetWindow(this)) != true || disposed) return;
+            try { TextDiff.SaveUnified(dialog.FileName, patch); status.Text = "差异补丁已保存。"; }
+            catch { status.Text = "补丁保存失败，请检查文件权限或选择其他位置。"; }
         }
         private void Render(TextDiffResult result)
         {
@@ -116,6 +143,6 @@ namespace CodexIsland
             if (synchronizingScroll || e.VerticalChange == 0) return;
             try { synchronizingScroll = true; target.ScrollToVerticalOffset(source.VerticalOffset); } finally { synchronizingScroll = false; }
         }
-        public void Dispose() { if (disposed) return; disposed = true; revision++; debounce.Stop(); if (pending != null) pending.Cancel(); left.Clear(); right.Clear(); leftPreview.Document = Document(); rightPreview.Document = Document(); LastResult = null; }
+        public void Dispose() { if (disposed) return; disposed = true; revision++; debounce.Stop(); if (pending != null) pending.Cancel(); left.Clear(); right.Clear(); leftPreview.Document = Document(); rightPreview.Document = Document(); LastResult = null; UnifiedPatch = null; UpdateExport(); }
     }
 }

@@ -43,7 +43,7 @@ public sealed partial class IslandWindow
         if (multiline) { input.MinHeight = 84; input.MaxHeight = 150; input.MaxLength = 64000; }
         else input.MaxLength = 240;
         var lastText = input.Text;
-        input.TextChanged += (_, _) => { var current = input.Text; if (current == lastText) return; lastText = current; if (key.StartsWith("batch-", StringComparison.Ordinal)) batchPlan = null; };
+        input.PropertyChanged += (_, change) => { if (change.Property != TextBox.TextProperty) return; var current = input.Text; if (current == lastText) return; lastText = current; if (key.StartsWith("batch-", StringComparison.Ordinal)) batchPlan = null; };
         return input;
     }
     private async Task ChooseBatchFiles(TextBox target, bool images)

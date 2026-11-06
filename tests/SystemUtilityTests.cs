@@ -16,7 +16,7 @@ namespace CodexIsland
         private static int checks;
         public static void Run()
         {
-            PortMonitorPresentationTests.Run(); PortTests(); TaskWatchTests(); AwakeTests();
+            PortMonitorPresentationTests.Run(); PortReportTests.Run(); PortTests(); TaskWatchTests(); AwakeTests();
             Console.WriteLine("PASS: " + checks + " port ownership, task watch and injected keep-awake checks.");
         }
         private static void PortTests()

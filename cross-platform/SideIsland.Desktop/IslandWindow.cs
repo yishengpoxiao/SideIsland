@@ -23,6 +23,8 @@ public sealed partial class IslandWindow : Window
     private readonly TaskActivityHub tasks = new();
     private readonly TaskActivityApi taskApi;
     private readonly CommandPlatformService platform = new();
+    private readonly IntegrationSources integrations;
+    private readonly bool injectedIntegrations;
     private readonly CancellationTokenSource lifetime = new();
     private readonly DispatcherTimer pulse = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly DispatcherTimer hover = new(), collapse = new(), saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(450) };
@@ -42,16 +44,19 @@ public sealed partial class IslandWindow : Window
     private DateTime nextMedia, nextQuota, awakeUntil;
     private MediaSnapshot? media;
     private UsageSnapshot? quota;
-    private CodexClient? codex;
+    private IQuotaSession? codex;
     private string status = "";
     private readonly bool testMode;
     public bool IsExpanded => expanded;
     public Preferences Settings => prefs;
     public bool UsesPhysicalNotch => realNotch;
     internal static string ApplicationVersion => typeof(IslandWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
-    public IslandWindow(bool testMode = false, string? dataDirectory = null)
+    public IslandWindow(bool testMode = false, string? dataDirectory = null) : this(testMode, dataDirectory, null) { }
+    internal IslandWindow(bool testMode, string? dataDirectory, IntegrationSources? sources)
     {
         this.testMode = testMode; store = new(dataDirectory); prefs = store.Load(); selected = prefs.LastTool;
+        injectedIntegrations = sources is not null;
+        integrations = sources ?? new(platform.ReadMediaAsync, platform.ControlMediaAsync, (executable, home) => new CodexQuotaSession(executable, home));
         taskApi = new(tasks);
         InitializeDragHandlers();
         Title = $"Side Island {ApplicationVersion} · macOS / Ubuntu preview";
@@ -70,7 +75,7 @@ public sealed partial class IslandWindow : Window
         Activated += (_, _) => { if (!closing) Place(); };
         PositionChanged += (_, _) => { if (dragging) hover.Stop(); };
         SizeChanged += (_, _) => { if (!placementBusy && expanded && !realNotch && IsVisible) { prefs.ExpandedWidth = Bounds.Width; prefs.ExpandedHeight = Bounds.Height; prefs.Normalize(); QueueSave(); } };
-        Closing += (_, e) => { if (!TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); codex?.Dispose(); platform.Dispose(); };
+        Closing += (_, e) => { if (!TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
         pulse.Tick += async (_, _) => await TickAsync();
         focus.SetCountdown(TimeSpan.FromMinutes(prefs.FocusMinutes), "Focus", true);
         focus.Completed += () => Notice(T("专注已完成", "Focus completed"), T("休息一下，再开始下一轮。", "Take a break before the next session."));
@@ -95,10 +100,10 @@ public sealed partial class IslandWindow : Window
     private TextBlock Hint(string value) { var t = Text(value, 11); t.Opacity = .65; return t; }
     private Border Card(Control child) => new() { Child = child, CornerRadius = new(14), Padding = new(12), Margin = new(0, 0, 0, 8), Background = CardBrush };
     private Button Button(string caption, Action action) { var b = new Button { Content = Text(caption, 12), HorizontalAlignment = HorizontalAlignment.Stretch }; b.Click += (_, _) => { try { action(); } catch (Exception e) { Report(e.Message); } }; return b; }
-    private Button AsyncButton(string caption, Func<Task> action)
+    private Button AsyncButton(string caption, Func<Task> action, Func<bool>? available = null)
     {
-        var b = new Button { Content = Text(caption, 12), HorizontalAlignment = HorizontalAlignment.Stretch };
-        b.Click += async (_, _) => { b.IsEnabled = false; try { await action(); } catch (OperationCanceledException) { } catch (Exception e) { Report(e.Message); } finally { if (!closing) b.IsEnabled = true; } }; return b;
+        var b = new Button { Content = Text(caption, 12), HorizontalAlignment = HorizontalAlignment.Stretch, IsEnabled = available?.Invoke() ?? true };
+        b.Click += async (_, _) => { if (closing || !b.IsEnabled || available?.Invoke() == false) return; b.IsEnabled = false; try { await action(); } catch (OperationCanceledException) { } catch (Exception e) { if (!closing) Report(e.Message); } finally { if (!closing) b.IsEnabled = available?.Invoke() ?? true; } }; return b;
     }
     private Control Actions(params Control[] controls)
     {
@@ -109,7 +114,7 @@ public sealed partial class IslandWindow : Window
     private TextBox Input(string key, string initial = "", bool multiline = false)
     {
         var input = new TextBox { Text = drafts.GetValueOrDefault(key, initial), AcceptsReturn = multiline, TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap, MinHeight = multiline ? 110 : 34, MaxLength = multiline ? 120000 : 4096, Margin = new(0, 0, 0, 6) };
-        input.TextChanged += (_, _) => drafts[key] = input.Text ?? ""; return input;
+        input.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty) drafts[key] = input.Text ?? ""; }; return input;
     }
     private void BuildShell()
     {
@@ -255,18 +260,5 @@ public sealed partial class IslandWindow : Window
         if (!testMode && prefs.MediaEnabled && DateTime.UtcNow >= nextMedia && !readingMedia) { nextMedia = DateTime.UtcNow.AddSeconds(2); _ = ReadMedia(); }
         if (!testMode && prefs.CodexEnabled && DateTime.UtcNow >= nextQuota && !readingQuota) { nextQuota = DateTime.UtcNow.AddSeconds(60); _ = ReadQuota(); }
         await Task.CompletedTask;
-    }
-    private async Task ReadMedia()
-    {
-        if (readingMedia || closing || testMode) return; readingMedia = true;
-        try { media = await platform.ReadMediaAsync(lifetime.Token); if (mediaTitle is not null) { mediaTitle.Text = media.Available ? media.Title : T("没有可读取的播放会话", "No readable player session"); mediaArtist.Text = media.Available ? media.Artist + " · " + media.Player : media.Error ?? ""; } RefreshCompact(); }
-        catch (OperationCanceledException) { } finally { readingMedia = false; }
-    }
-    private async Task MediaAction(string action) { if (testMode) return; var error = await platform.ControlMediaAsync(action, lifetime.Token); if (error is not null) Report(error); await ReadMedia(); }
-    private async Task ReadQuota()
-    {
-        if (readingQuota || closing || testMode) return; readingQuota = true;
-        try { codex ??= new(prefs.CodexPath, prefs.CodexHome); quota = await Task.Run(() => codex.ReadLimits(12000), lifetime.Token); if (quotaText is not null) quotaText.Text = QuotaValue(false) + "\n\n" + QuotaValue(true); RefreshCompact(); }
-        catch (OperationCanceledException) { } catch (Exception e) { Report(e.Message); } finally { readingQuota = false; }
     }
 }

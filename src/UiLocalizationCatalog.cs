@@ -969,6 +969,7 @@ H · 最高纠错（1,272 字节）|H · Highest correction (1,272 bytes)
             MixerLanCatalog();
             AnnotationBatchCatalog();
             NextFeatureCatalog();
+            PortsCatalog();
         }
         private static void BuildUnits()
         {

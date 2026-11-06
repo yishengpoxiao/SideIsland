@@ -54,7 +54,7 @@ public sealed partial class IslandWindow
     {
         body.Children.Add(Hint(OperatingSystem.IsMacOS() ? T("Apple Music 通过公开 Apple Events 连接，首次操作可能需要你在系统中允许自动化。其他播放器需各自接口。", "Apple Music uses public Apple Events. macOS may ask you to allow Automation. Other players require their own integration.") : T("Ubuntu 使用 MPRIS / playerctl，支持发布 MPRIS 的播放器。没有会话时不显示虚假进度。", "Ubuntu uses MPRIS / playerctl for supported players. Missing timelines are not estimated.")));
         mediaTitle = Text(media?.Available == true ? media.Title : T("尚未连接播放器", "Player is not connected"), 20); mediaArtist = Hint(media?.Artist ?? ""); body.Children.Add(Card(new StackPanel { Spacing = 5, Children = { mediaTitle, mediaArtist } }));
-        body.Children.Add(Actions(AsyncButton(T("连接 / 刷新", "Connect / refresh"), async () => { prefs.MediaEnabled = true; Save(); await ReadMedia(); }), Button(T("断开", "Disconnect"), () => { prefs.MediaEnabled = false; media = null; Save(); RenderPage(); RefreshCompact(); })));
+        body.Children.Add(Actions(AsyncButton(T("连接 / 刷新", "Connect / refresh"), ConnectMedia), Button(T("断开", "Disconnect"), DisconnectMedia)));
         body.Children.Add(Actions(AsyncButton("⏮", () => MediaAction("previous")), AsyncButton("▶ / Ⅱ", () => MediaAction("play-pause")), AsyncButton("⏭", () => MediaAction("next"))));
     }
     private void RenderQuota()
@@ -63,7 +63,7 @@ public sealed partial class IslandWindow
         body.Children.Add(Hint(T("使用本机已登录的 Codex app-server 只读接口，不复制账户凭据。需要你主动连接。", "Uses the local, signed-in Codex app-server read-only interface. Credentials are not copied. Connect explicitly.")));
         var executable = Input("codex-path", prefs.CodexPath); executable.PlaceholderText = T("codex 可执行文件路径；留空自动查找", "Codex executable; leave empty to discover");
         var home = Input("codex-home", prefs.CodexHome); home.PlaceholderText = "CODEX_HOME"; body.Children.Add(executable); body.Children.Add(home);
-        body.Children.Add(Actions(AsyncButton(T("连接 / 刷新", "Connect / refresh"), async () => { codex?.Dispose(); codex = null; prefs.CodexPath = executable.Text ?? ""; prefs.CodexHome = home.Text ?? ""; prefs.CodexEnabled = true; Save(); await ReadQuota(); }), Button(T("断开", "Disconnect"), () => { prefs.CodexEnabled = false; codex?.Dispose(); codex = null; quota = null; Save(); RenderPage(); RefreshCompact(); })));
+        body.Children.Add(Actions(AsyncButton(T("连接 / 刷新", "Connect / refresh"), () => ConnectQuota(executable.Text ?? "", home.Text ?? "")), Button(T("断开", "Disconnect"), DisconnectQuota)));
     }
     private void RenderPorts()
     {
@@ -78,7 +78,7 @@ public sealed partial class IslandWindow
     }
     private void RenderNotes()
     {
-        var notes = Input("notes", prefs.Notes, true); notes.MinHeight = 250; notes.MaxLength = 60000; notes.TextChanged += (_, _) => { prefs.Notes = notes.Text ?? ""; QueueSave(); }; body.Children.Add(notes);
+        var notes = Input("notes", prefs.Notes, true); notes.MinHeight = 250; notes.MaxLength = 60000; notes.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty && !closing) { prefs.Notes = notes.Text ?? ""; QueueSave(); } }; body.Children.Add(notes);
         body.Children.Add(Actions(AsyncButton(T("复制", "Copy"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(notes.Text ?? ""); }), Button(T("保存", "Save"), Save)));
         body.Children.Add(Hint(T("仅保存在本机跨平台版本的数据目录，不覆盖 Windows 版资料。", "Stored locally in the portable app's data folder, separate from the Windows edition.")));
     }
@@ -87,16 +87,6 @@ public sealed partial class IslandWindow
         var text = Input("clipboard", "", true); text.MinHeight = 230; body.Children.Add(text);
         body.Children.Add(Actions(AsyncButton(T("读取文字", "Read text"), async () => { if (Clipboard is not null && !testMode) text.Text = await Clipboard.TryGetTextAsync() ?? ""; }), AsyncButton(T("复制文字", "Copy text"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(text.Text ?? ""); })));
         body.Children.Add(Hint(T("此预览版提供主动读写。Wayland 后台剪贴板历史取决于桌面权限，不会把手动读取伪装成全局监听。", "This preview provides explicit clipboard actions. Wayland background history depends on desktop support and permissions.")));
-    }
-    private void RenderDiff()
-    {
-        var left = Input("diff-left", "", true); var right = Input("diff-right", "", true); var rows = new StackPanel { Spacing = 3 };
-        body.Children.Add(Hint(T("原文", "Original"))); body.Children.Add(left); body.Children.Add(Hint(T("新文", "Revised"))); body.Children.Add(right);
-        body.Children.Add(AsyncButton(T("比较差异", "Compare"), async () => { var a = left.Text ?? ""; var b = right.Text ?? ""; var result = await Task.Run(() => TextDiff.Compare(a, b, lifetime.Token), lifetime.Token); rows.Children.Clear();
-            rows.Children.Add(Hint(T($"新增 {result.Added} · 删除 {result.Removed} · 修改 {result.Modified}", $"Added {result.Added} · Removed {result.Removed} · Changed {result.Modified}")));
-            foreach (var line in result.Rows.Take(1600)) { var label = Text((line.LeftNumber?.ToString() ?? "+") + " │ " + line.Left + (line.Kind == TextDiffKind.Modified ? "\n→ " + line.Right : line.Kind == TextDiffKind.Added ? line.Right : ""), 12); var card = Card(label); card.Background = new SolidColorBrush(Color.Parse(line.Kind == TextDiffKind.Added ? prefs.LightTheme ? "#E5F4E9" : "#253D32" : line.Kind == TextDiffKind.Removed ? prefs.LightTheme ? "#FCE9EA" : "#472A2E" : line.Kind == TextDiffKind.Modified ? prefs.LightTheme ? "#EBE8FA" : "#3B354D" : prefs.LightTheme ? "#F2F2F7" : "#232326")); rows.Children.Add(card); }
-            if (result.Rows.Count > 1600) rows.Children.Add(Hint(T("差异已完整计算，页面只显示前 1,600 项。", "The full difference was computed; this preview shows the first 1,600 rows.")));
-        })); body.Children.Add(rows);
     }
     private void RenderText()
     {

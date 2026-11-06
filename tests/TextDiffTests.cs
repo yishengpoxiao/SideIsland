@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Controls;
@@ -37,8 +39,40 @@ namespace CodexIsland
             }
             var bounded = TextDiff.Compare(String.Join("\n", Enumerable.Range(0, 1600).Select(i => "old" + i)), String.Join("\n", Enumerable.Range(0, 1600).Select(i => "new" + i)));
             Check(bounded.Modified == 1600, "Maximum supported completely different input completes with bounded memory");
+            ExportTests();
             PanelTests();
             Console.WriteLine("PASS: text comparison limits, Unicode, edits, cancellation and stale result tests.");
+        }
+        private static void ExportTests()
+        {
+            string added = TextDiff.ExportUnified("", "新增😀", CancellationToken.None);
+            Check(added == "--- a/text.txt\n+++ b/text.txt\n@@ -0,0 +1,1 @@\n+新增😀\n\\ No newline at end of file\n", "empty input exports a valid addition with unterminated-line marker");
+            string removed = TextDiff.ExportUnified("old\n", "", CancellationToken.None);
+            Check(removed == "--- a/text.txt\n+++ b/text.txt\n@@ -1,1 +0,0 @@\n-old\n", "empty target exports correct zero-count hunk");
+            Check(TextDiff.ExportUnified("a\r\nb\r", "a\nb\n", CancellationToken.None) == "", "line-ending normalization alone produces no patch");
+            string newline = TextDiff.ExportUnified("a", "a\n", CancellationToken.None);
+            Check(newline.Contains("-a\n\\ No newline at end of file\n+a\n") && !newline.Contains("+\n"), "final LF change is not exported as a phantom blank line");
+            string longLine = new string('长', 2300) + "😀";
+            string many = String.Join("\n", Enumerable.Range(0, 700).Select(i => "line" + i));
+            string patch = TextDiff.ExportUnified(many, many + "\n" + longLine, CancellationToken.None);
+            Check(patch.Contains(longLine) && patch.Contains("line699"), "export retains long lines and changes beyond the UI preview bound");
+            string source = String.Join("\n", Enumerable.Range(0, 40).Select(i => "row " + i)) + "\n";
+            string hunks = TextDiff.ExportUnified(source, source.Replace("row 3\n", "new 3\n").Replace("row 35\n", "new 35\n"), CancellationToken.None);
+            Check(hunks.Split(new[] { "@@ -" }, StringSplitOptions.None).Length == 3 && !hunks.Contains(" row 20\n"), "distant changes use separate three-context-line hunks");
+            string folder = Path.Combine(Path.GetTempPath(), "island-diff-export-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(folder);
+            try
+            {
+                string path = Path.Combine(folder, "comparison.patch"); TextDiff.SaveUnified(path, patch);
+                Check(File.ReadAllBytes(path).SequenceEqual(new UTF8Encoding(false, true).GetBytes(patch)), "actual saved patch is complete UTF-8 without BOM");
+                TextDiff.SaveUnified(path, added); Check(File.ReadAllText(path) == added, "explicit save atomically replaces an existing output");
+                bool failed = false; try { TextDiff.SaveUnified(path, "bad\ud800"); } catch (EncoderFallbackException) { failed = true; }
+                Check(failed && File.ReadAllText(path) == added, "invalid UTF-16 cannot truncate the previous output");
+                Check(Directory.GetFiles(folder, "*.tmp").Length == 0, "atomic export removes temporary files");
+            }
+            finally { Directory.Delete(folder, true); }
+            var cancellation = new CancellationTokenSource(); cancellation.Cancel(); bool cancelled = false;
+            try { TextDiff.ExportUnified("old", "new", cancellation.Token); } catch (OperationCanceledException) { cancelled = true; } finally { cancellation.Dispose(); }
+            Check(cancelled, "export cancellation is honored");
         }
         private static void PanelTests()
         {
@@ -52,7 +86,11 @@ namespace CodexIsland
                 Task stale = panel.CompareNowAsync(); left.Text = "最新😀"; right.Text = "最新😀"; Task newest = panel.CompareNowAsync();
                 Pump(Task.WhenAll(stale, newest));
                 Check(panel.LastResult != null && panel.LastResult.Identical && panel.LastResult.Rows.Count == 1 && panel.LastResult.Rows[0].Left == "最新😀", "Older background result cannot overwrite the latest input");
+                Check(panel.UnifiedPatch == "" && !Field<Button>(panel, "copyPatch").IsEnabled && !Field<Button>(panel, "savePatch").IsEnabled, "identical text disables patch actions");
+                right.Text = "新文本😀\n"; Pump(panel.CompareNowAsync());
+                Check(panel.UnifiedPatch.Contains("+新文本😀\n") && Field<Button>(panel, "copyPatch").IsEnabled && Field<Button>(panel, "savePatch").IsEnabled, "successful comparison publishes full export and enables actions");
                 left.Text = "changed"; Check(panel.LastResult == null, "Input edit invalidates the previous comparison immediately");
+                Check(panel.UnifiedPatch == null && !Field<Button>(panel, "copyPatch").IsEnabled && !Field<Button>(panel, "savePatch").IsEnabled, "input changes immediately disable stale export");
                 panel.Dispose(); Pump(stale); Check(panel.LastResult == null && left.Text.Length == 0 && right.Text.Length == 0, "Disposal clears transient text and prevents later result publication");
             }
             }
