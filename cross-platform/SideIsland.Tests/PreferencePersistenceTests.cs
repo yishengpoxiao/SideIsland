@@ -20,6 +20,7 @@ internal static class PreferencePersistenceTests
             Console.WriteLine("PASS: " + checks + " preference/state persistence checks; explicit recovery, exact external-version protection, bounded reads, ordinary-backup cleanup, partial-write diagnostics and nonblocking immutable UI state. Owned temporary files only; exchange adapter fixtures do not establish native Mac/Linux validation.");
         }
         finally { Directory.Delete(root, true); }
+        StateFileCancellationTests.Run();
     }
     private static string DirectoryFor(string root)
     { string value = Path.Combine(root, Guid.NewGuid().ToString("N")); Directory.CreateDirectory(value); return value; }

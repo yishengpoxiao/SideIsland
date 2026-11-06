@@ -79,11 +79,13 @@ public sealed class PortableStateFile
             }
         }
     }
-    public void Save(byte[] bytes) => SaveCore(bytes, false);
-    public void RecoverAndSave(byte[] bytes) => SaveCore(bytes, true);
-    private void SaveCore(byte[] bytes, bool recovering)
+    public void Save(byte[] bytes) => SaveCore(bytes, false, CancellationToken.None);
+    public void Save(byte[] bytes, CancellationToken cancellationToken) => SaveCore(bytes, false, cancellationToken);
+    public void RecoverAndSave(byte[] bytes) => SaveCore(bytes, true, CancellationToken.None);
+    private void SaveCore(byte[] bytes, bool recovering, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(bytes);
+        cancellationToken.ThrowIfCancellationRequested();
         long revision = Interlocked.Increment(ref draftRevision);
         Update(current => current with { Dirty = true });
         try
@@ -99,7 +101,7 @@ public sealed class PortableStateFile
                     if (!Status.LoadFailed || baseline is not { Exists: true }) throw Issue(StateFileProblemCode.LoadFailed, "Recovery requires a readable original file and explicit user action.");
                 }
                 else if (Status.LoadFailed) throw Issue(StateFileProblemCode.LoadFailed, "The unreadable original is retained. Reload or explicitly recover before saving.");
-                string? backup = Commit(frozen, recovering);
+                string? backup = Commit(frozen, recovering, cancellationToken);
                 Saved(revision, backup, null);
             }
         }
@@ -128,7 +130,7 @@ public sealed class PortableStateFile
             if (ReferenceEquals(Interlocked.CompareExchange(ref status, next, current), current)) return;
         }
     }
-    private string? Commit(byte[] bytes, bool recovering)
+    private string? Commit(byte[] bytes, bool recovering, CancellationToken cancellationToken)
     {
         string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp", lockPath = FilePath + ".lock";
         FileStream? writerLock = null;
@@ -137,11 +139,13 @@ public sealed class PortableStateFile
         Stamp? staging = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             CheckLocation(FilePath);
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             try { writerLock = new FileStream(lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None); }
             catch (IOException error) { throw new StateFileException(StateFileProblemCode.Busy, FilePath, "Another save or a leftover lock is blocking this state file.", error); }
             MatchBaseline();
+            cancellationToken.ThrowIfCancellationRequested();
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough))
             {
                 createdIdentity = PortableBatchFiles.ReadOpenFileIdentity(stream.SafeFileHandle);
@@ -149,6 +153,9 @@ public sealed class PortableStateFile
             }
             staging = ReadFile(temporary).Stamp;
             checkpoint?.Invoke("prepared"); MatchBaseline(); checkpoint?.Invoke("checked");
+            // After this boundary, cancellation cannot undo or reclassify a
+            // native commit. Its result must be verified using the file stamps.
+            cancellationToken.ThrowIfCancellationRequested();
             var expected = baseline!;
             if (expected.Exists)
             {
@@ -178,7 +185,16 @@ public sealed class PortableStateFile
             }
             return backup;
         }
-        catch (Exception error) when (Expected(error))
+        catch (OperationCanceledException error) when (!attempted)
+        {
+            string? retained = CleanDraft(temporary, createdIdentity, out bool cleaned);
+            if (retained is not null || !cleaned)
+                throw new StateFileException(StateFileProblemCode.Io, FilePath,
+                    "Save was cancelled before commit, but staging cleanup did not finish. Inspect: " + temporary, error)
+                    { BackupPath = retained };
+            throw;
+        }
+        catch (Exception error) when (Expected(error) || error is OperationCanceledException)
         {
             if (!attempted)
             {
@@ -229,16 +245,18 @@ public sealed class PortableStateFile
             }
         }
     }
-    private string? CleanDraft(string path, string? identity)
+    private string? CleanDraft(string path, string? identity) => CleanDraft(path, identity, out _);
+    private string? CleanDraft(string path, string? identity, out bool cleaned)
     {
+        cleaned = identity is null;
         if (identity is null) return null;
         // Check our created identity before cleanup; preserve detected replacements.
         // This does not isolate hostile writers with access to the same directory.
         try
         {
-            if (EntryIdentity(path) != identity) return null;
-            try { File.Delete(path); return null; }
-            catch (Exception cleanup) when (Expected(cleanup)) { return EntryIdentity(path) == identity ? path : null; }
+            if (EntryIdentity(path) != identity) { cleaned = true; return null; }
+            try { File.Delete(path); cleaned = true; return null; }
+            catch (Exception cleanup) when (Expected(cleanup)) { cleaned = EntryIdentity(path) != identity; return cleaned ? null : path; }
         }
         catch (Exception inspect) when (Expected(inspect)) { return null; }
     }
