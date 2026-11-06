@@ -6,11 +6,12 @@ English | [简体中文](README.zh-CN.md)
 
 ## What is included
 
-The compact interface provides 21 entries: focus, music, Codex usage, ports, notes, clipboard, text comparison, text tools, QR transfer, calculator, random tools, checksums, screenshot pins, batch files, batch images, notifications, task watch, keep awake, system volume, task activities and settings. English/Chinese switching and light/dark themes are available. This is a port in progress, with a smaller scope than the Windows edition; see [porting status](docs/PORTING-STATUS.md).
+The current development interface provides 22 entries: focus, music, Codex usage, ports, log watch, notes, clipboard, text comparison, text tools, QR transfer, calculator, random tools, checksums, screenshot pins, batch files, batch images, notifications, task watch, keep awake, system volume, task activities and settings. The published v1.0.0 preview has 21 entries; new work is described in [Unreleased](../docs/UNRELEASED.md). English/Chinese switching and light/dark themes are available. This is a port in progress, with a smaller scope than the Windows edition; see [porting status](docs/PORTING-STATUS.md).
 
 - **Notifications:** app exclusions, priority, repeat merging, search, unread management and optional local history. Mac reads only accessible visible notification cards after explicit Accessibility opt-in. Ubuntu monitors new session D-Bus `Notify` calls when permitted. A token-protected local HTTP input is off by default. It does not replace the system notification service or promise hidden message history. [Details](docs/NOTIFICATIONS.md).
 - **Screenshot pins:** system area selection on Mac; the Screenshot portal on Ubuntu, with installed GNOME Screenshot/Spectacle fallbacks only when the interface is unavailable. Drag, zoom, adjust opacity, close or save a new PNG. Cancellation and permission denial do not launch another picker. [Details](docs/SCREEN-PIN.md).
 - **Batch files/images:** preview names and conflicts before renaming; retain an operation journal and support same-session undo when file identity/content still matches. Resize multiple images, change JPEG quality and export PNG/JPEG to a new output location. [Details](docs/BATCH-FILES.md).
+- **Log watch:** explicitly start a local file tail, including a future file path; filter and copy shown lines, clear the view, and receive local keyword alerts for new content. Watches continue while collapsed or on another page and stop when the app exits. Initial history does not alert. [Limits and behavior](docs/LOG-WATCH.md).
 
 Implemented adapters and managed tests do not establish that native permissions, capture, notifications or filesystem calls have passed on the destination system.
 

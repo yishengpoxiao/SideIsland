@@ -17,7 +17,7 @@ internal static class ScreenPinTests
     public static void Run()
     {
         checks = 0;
-        State(); Arguments(); Task.Run(CaptureBehaviorAsync).GetAwaiter().GetResult(); PinLayouts();
+        State(); Arguments(); Task.Run(CaptureBehaviorAsync).GetAwaiter().GetResult(); PinLayouts(); ScreenPinLifecycleTests.Run();
         Console.WriteLine($"PASS: {checks} screenshot pin behavior and actual headless layouts; owned PNG cleanup, portal cancellation/permission policy, safe command arguments, zoom/opacity, zh/en and light/dark. No macOS/Ubuntu capture or compositor claim.");
     }
     private static void State()

@@ -4,6 +4,16 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Portable log watch and asynchronous tool fixes
+
+The preview now includes a log watch tool: explicitly start a local file tail, including a future path, follow or filter retained lines, copy the displayed content, clear the view and stop. New keyword matches produce local notifications subject to app exclusions; initial history is not replayed. The bounded reader supports UTF-8 and BOM-marked UTF-16/UTF-32, replacement/truncation detection and a single background worker. Slow OS reads cannot accumulate workers, and obsolete callbacks cannot update a stopped, restarted or closed session. Native Mac/Ubuntu filesystem validation remains outstanding. See [limits and behavior](../cross-platform/docs/LOG-WATCH.md).
+
+Delayed clipboard reads no longer overwrite manual edits or resurrect detached/closed drafts. Editing QR input invalidates the old generated code; delayed save pickers cannot save obsolete results. QR and screenshot exports create a new PNG without replacing an existing file. Notification search is captured synchronously, preserving same-turn navigation edits. Screenshot operations retain one shared pending state through capture, decoding and pin handoff, including cancellation and page reconstruction.
+
+The Windows/shared log reader now waits for a fragmented BOM before choosing an encoding, fixing garbled text and missed keyword alerts when a new file's header is written in pieces. The portable controller also handles clearing before its initial read without redisplaying historical lines. Invalid incremental keyword input stays in the editor with localized feedback instead of escaping its change handler.
+
+Validation for this fifth batch: seven related Windows suites passed with unchanged inputs and no automatic retry. Two consecutive complete preview rounds passed with unchanged source hashes and zero build warnings: 4,224 general tool layouts, 57,792 general action-caption checks, and 192 populated log layouts, in addition to existing populated checksum/export/port/watch matrices. Each round includes 174 log backend checks, 3,295 log UI assertions, 16 clipboard/QR/search scenarios, 67 new screenshot lifecycle/publication checks and 198 existing screenshot behavior/layout checks. Actual rendered English light and Chinese dark log pages were inspected. First failures, controlled reproducers, assembly/source hashes and final logs are retained locally. Native Windows alpha-hit testing remains blocked by the lock screen; Mac/Ubuntu native validation remains outstanding.
+
 ## Checksum export and background controls
 
 Windows and the preview can now copy or save a calculated SHA-256 / SHA-512 checksum list. Exports use the GNU binary format, contain only the basename and digest, and save UTF-8 without a BOM using LF line endings. Existing files, directories and symlinks are never replaced. A save picker returning after a changed calculation, navigation or closure cannot export an obsolete result. Disk publication runs in the background; duplicate save requests are suppressed. A native filename that cannot be represented faithfully in UTF-8 still supports hashing and copying the digest, with manifest export unavailable.
@@ -58,6 +68,14 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 ## 中文说明
 
 这些是 v1.0.0 之后的开发改动，已发布的 v1.0.0 安装包保持不变。
+
+跨平台开发版新增日志追踪入口，可主动读取本机日志或等待未来文件，支持跟随、筛选、复制显示内容、清除视图和停止。只有新增关键词匹配才发出本地通知，并遵守禁用规则；历史不补发。有界读取支持 UTF-8 和带 BOM 的 UTF-16／UTF-32、文件替换及截断识别；只允许一个后台读取，慢系统调用不会堆积线程，停止、重启或关闭后拒绝旧结果回写。原生 Mac／Ubuntu 文件系统行为仍待实机验证，详细限制见 [日志追踪](../cross-platform/docs/LOG-WATCH.md)。
+
+修复剪贴板迟到结果覆盖手动输入、恢复旧页面草稿的问题。修改二维码输入后旧码立即失效，迟到的保存对话框不能导出旧内容；二维码及截图另存均不替换已有文件。通知搜索改为同步记录，快速切页不再丢失。截图从捕获、解码到新钉屏窗口移交始终保留唯一进行中状态，切页重建及取消不会启动重复操作。
+
+Windows／共享日志读取器还修复了 BOM 分批写入时过早选择编码、产生乱码和漏报关键词的问题。跨平台控制器修复首次读取前清除视图却重新显示历史的边界；关键词输入超过限制时保留编辑文字、显示本地化提示，不再从属性事件抛出异常。
+
+第五批最终通过 7 套相关 Windows 回归，无自动复跑、输入哈希不变。跨平台连续两轮完整回归通过、编译零警告、源码哈希不变：共 4,224 个常规工具布局、57,792 项常规按钮文字检查、192 个填充日志页布局，以及已有填充校验／导出／端口／守望矩阵。每轮包含 174 项日志后端检查、3,295 项日志 UI 断言、16 个剪贴板／二维码／搜索场景、67 项新增截图生命周期／发布检查和 198 项原有截图行为／布局检查。英文亮色、中文暗色日志渲染图已实际查看。首次失败、复现、源码与程序集哈希及最终日志均保留；Windows 锁屏仍阻挡原生透明点击测试，Mac／Ubuntu 实机验证仍待补齐。
 
 Windows 和跨平台预览版新增校验清单复制／另存功能，支持 SHA-256／SHA-512。清单使用 GNU 二进制格式，只包含文件名与校验值，以 UTF-8 无 BOM、LF 换行保存；不会替换已有文件、文件夹或符号链接。保存对话框返回前若计算、输入、页面或窗口状态已改变，旧结果不会导出。磁盘保存改为后台执行，并阻止重复保存。无法完整编码为 UTF-8 的本机文件名仍可计算和复制校验值，仅禁用清单导出。
 

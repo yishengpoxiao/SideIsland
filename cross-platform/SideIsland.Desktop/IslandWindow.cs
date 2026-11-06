@@ -75,7 +75,7 @@ public sealed partial class IslandWindow : Window
         Activated += (_, _) => { if (!closing) Place(); };
         PositionChanged += (_, _) => { if (dragging) hover.Stop(); };
         SizeChanged += (_, _) => { if (!placementBusy && expanded && !realNotch && IsVisible) { prefs.ExpandedWidth = Bounds.Width; prefs.ExpandedHeight = Bounds.Height; prefs.Normalize(); QueueSave(); } };
-        Closing += (_, e) => { if (!TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
+        Closing += (_, e) => { if (!TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); logController.Dispose(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
         pulse.Tick += async (_, _) => await TickAsync();
         focus.SetCountdown(TimeSpan.FromMinutes(prefs.FocusMinutes), "Focus", true);
         focus.Completed += () => Notice(T("专注已完成", "Focus completed"), T("休息一下，再开始下一轮。", "Take a break before the next session."));
@@ -86,7 +86,7 @@ public sealed partial class IslandWindow : Window
     internal static readonly (string Id, string Zh, string En)[] Tools =
     [
         ("focus", "专注计时", "Focus timer"), ("media", "正在播放", "Now playing"), ("quota", "Codex 额度", "Codex usage"),
-        ("ports", "端口占用", "Port monitor"), ("notes", "便笺", "Notes"), ("clipboard", "剪贴板", "Clipboard"),
+        ("ports", "端口占用", "Port monitor"), ("logs", "日志追踪", "Log watch"), ("notes", "便笺", "Notes"), ("clipboard", "剪贴板", "Clipboard"),
         ("diff", "文字对照", "Text comparison"), ("text", "文字工具", "Text tools"), ("qr", "二维码传话", "QR transfer"),
         ("calculator", "计算器", "Calculator"), ("random", "密码与随机", "Password / random"),
         ("hash", "文件校验", "File checksums"), ("screen-pin", "截图钉屏", "Screenshot pin"), ("batch-files", "批量文件", "Batch files"), ("batch-images", "批量图片", "Batch images"),
@@ -172,7 +172,7 @@ public sealed partial class IslandWindow : Window
         slotOne.FontSize = slotTwo.FontSize = horizontal ? 12 : 15;
         slotOne.Text = Widget(prefs.Slot1); slotTwo.Text = Widget(prefs.Slot2);
     }
-    public void Expand() { if (expanded) return; expanded = true; hover.Stop(); collapse.Stop(); SetVisibility(); Place(); body.Opacity = 0; Dispatcher.UIThread.Post(() => body.Opacity = 1, DispatcherPriority.Render); }
+    public void Expand() { if (expanded) return; expanded = true; hover.Stop(); collapse.Stop(); SetVisibility(); Place(); RefreshLogView(); body.Opacity = 0; Dispatcher.UIThread.Post(() => body.Opacity = 1, DispatcherPriority.Render); }
     public void Collapse() { if (!expanded) return; expanded = false; hover.Stop(); collapse.Stop(); SetVisibility(); Place(); }
     private void SetVisibility() { compactHost.IsVisible = !expanded; expandedHost.IsVisible = expanded; CanResize = expanded && !realNotch; }
     private void SelectPage(string value) { page = value; RenderPage(); }
@@ -256,6 +256,7 @@ public sealed partial class IslandWindow : Window
         if (Interlocked.Exchange(ref tasksDirty, 0) != 0 && expanded && selected == "activities") RenderTaskRows();
         if (Interlocked.Exchange(ref notificationDirty, 0) != 0 && expanded && page == "messages") RefreshNotificationRows();
         PollWatches();
+        PollLogs();
         PollAwakeState();
         if (!testMode && prefs.MediaEnabled && DateTime.UtcNow >= nextMedia && !readingMedia) { nextMedia = DateTime.UtcNow.AddSeconds(2); _ = ReadMedia(); }
         if (!testMode && prefs.CodexEnabled && DateTime.UtcNow >= nextQuota && !readingQuota) { nextQuota = DateTime.UtcNow.AddSeconds(60); _ = ReadQuota(); }

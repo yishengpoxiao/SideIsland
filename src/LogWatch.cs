@@ -9,12 +9,15 @@ using Microsoft.Win32.SafeHandles;
 
 namespace CodexIsland
 {
+    internal enum LogWatchState { Stopped, Watching, Missing, Rotated, Truncated, Skipped, Retrying }
     internal sealed class LogWatchSnapshot
     {
         public string Path, Status, Alert;
         public List<string> Lines = new List<string>();
         public long Offset;
         public bool Missing, Reset;
+        public LogWatchState State;
+        public string Error;
     }
     internal sealed class LogWatchReader : IDisposable
     {
@@ -22,6 +25,7 @@ namespace CodexIsland
         private readonly object gate = new object();
         private readonly List<string> lines = new List<string>();
         private readonly Func<DateTime> clock;
+        private readonly Func<FileStream, string> identify;
         private string path, fileIdentity, partial = "";
         private long offset;
         private int characters;
@@ -32,17 +36,36 @@ namespace CodexIsland
         private DateTime lastAlertUtc = DateTime.MinValue;
         internal string[] Keywords { get { lock (gate) return keywords.ToArray(); } }
         public LogWatchReader(string target) : this(target, () => DateTime.UtcNow) { }
-        internal LogWatchReader(string target, Func<DateTime> now)
+        internal LogWatchReader(string target, Func<DateTime> now) : this(target, now, stream => Identity(stream.SafeFileHandle)) { }
+        internal LogWatchReader(string target, Func<DateTime> now, Func<FileStream, string> identity)
         {
-            string input = (target ?? "").Trim().Trim('"');
+            if (now == null) throw new ArgumentNullException("now");
+            if (identity == null) throw new ArgumentNullException("identity");
+            path = NormalizePath(target); clock = now; identify = identity;
+        }
+        internal static string NormalizePath(string target)
+        {
+            string input = PathInput(target, System.IO.Path.DirectorySeparatorChar == '\\');
             if (String.IsNullOrWhiteSpace(input) || !System.IO.Path.IsPathRooted(input)) throw new ArgumentException("请输入日志文件完整路径。");
-            path = System.IO.Path.GetFullPath(input); clock = now;
+            return System.IO.Path.GetFullPath(input);
+        }
+        // Whitespace is part of Unix filenames; retain the Windows input convention.
+        internal static string PathInput(string target, bool windows)
+        {
+            string input = target ?? "";
+            if (windows) return input.Trim().Trim('"');
+            return input.Length >= 2 && input[0] == '"' && input[input.Length - 1] == '"' ? input.Substring(1, input.Length - 2) : input;
         }
         public void SetKeywords(string value)
         {
+            var entries = ParseKeywords(value);
+            lock (gate) { keywords = entries; partialMatched = Matches(partial); }
+        }
+        internal static string[] ParseKeywords(string value)
+        {
             var entries = (value ?? "").Split(new[] { ',', ';', '\r', '\n', '，', '；' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (entries.Length > 20 || entries.Any(x => x.Length > 100)) throw new ArgumentException("最多 20 个关键词，每个最多 100 字。");
-            lock (gate) { keywords = entries; partialMatched = Matches(partial); }
+            return entries;
         }
         public void Clear() { lock (gate) { lines.Clear(); partial = ""; characters = 0; previousCarriageReturn = false; partialMatched = false; } }
         public LogWatchSnapshot Read()
@@ -50,12 +73,12 @@ namespace CodexIsland
             lock (gate)
             {
                 var snapshot = new LogWatchSnapshot { Path = path, Offset = offset };
-                if (disposed) { snapshot.Status = "监测已停止。"; return snapshot; }
+                if (disposed) { snapshot.State = LogWatchState.Stopped; snapshot.Status = "监测已停止。"; return snapshot; }
                 try
                 {
                     using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan))
                     {
-                        string identity = Identity(stream.SafeFileHandle);
+                        string identity = identify(stream);
                         bool replaced = initialized && fileIdentity != identity;
                         bool truncated = initialized && (stream.Length < offset || (!replaced && BoundaryChanged(stream)));
                         bool initial = !initialized || replaced || truncated;
@@ -66,6 +89,13 @@ namespace CodexIsland
                         if (initial || firstAppend || backlog)
                         {
                             int bom; Encoding encoding = DetectEncoding(stream, out bom);
+                            if (encoding == null)
+                            {
+                                // Writers may flush a BOM in several pieces. Do
+                                // not choose UTF-8 or consume a prefix too early.
+                                snapshot.State = LogWatchState.Watching; snapshot.Status = "正在等待日志编码头写入完成。";
+                                return CompleteSnapshot(snapshot);
+                            }
                             long start = Math.Max(bom, stream.Length - MaximumReadBytes);
                             int unit = encoding.CodePage == 1200 || encoding.CodePage == 1201 ? 2 : encoding.CodePage == 12000 || encoding.CodePage == 12001 ? 4 : 1;
                             start -= (start - bom) % unit;
@@ -76,26 +106,32 @@ namespace CodexIsland
                             ReadChunk(stream, start > bom, firstAppend, snapshot);
                             initialized = true; fileIdentity = identity;
                             snapshot.Status = backlog ? "文件增长较快，已跳到末尾。" : replaced ? "日志已轮换，正在读取新文件。" : truncated ? "日志已截断，已重新读取。" : "正在监测新增日志。";
+                            snapshot.State = backlog ? LogWatchState.Skipped : replaced ? LogWatchState.Rotated : truncated ? LogWatchState.Truncated : LogWatchState.Watching;
                         }
                         else
                         {
                             stream.Position = offset; ReadChunk(stream, false, true, snapshot);
                             snapshot.Status = "正在监测新增日志。";
+                            snapshot.State = LogWatchState.Watching;
                         }
                         RememberBoundary(stream);
                     }
                 }
-                catch (FileNotFoundException) { snapshot.Missing = true; snapshot.Status = "文件尚不存在，等待出现…"; }
-                catch (DirectoryNotFoundException) { snapshot.Missing = true; snapshot.Status = "文件尚不存在，等待出现…"; }
-                catch (IOException error) { snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
-                catch (UnauthorizedAccessException error) { snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
-                catch (Win32Exception error) { snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
-                snapshot.Offset = offset; snapshot.Lines = lines.ToList();
-                if (partial.Length > 0) snapshot.Lines.Add(partial);
-                int total = snapshot.Lines.Sum(x => x.Length);
-                while (snapshot.Lines.Count > MaximumLines || total > MaximumBufferCharacters) { total -= snapshot.Lines[0].Length; snapshot.Lines.RemoveAt(0); }
-                return snapshot;
+                catch (FileNotFoundException) { snapshot.Missing = true; snapshot.State = LogWatchState.Missing; snapshot.Status = "文件尚不存在，等待出现…"; }
+                catch (DirectoryNotFoundException) { snapshot.Missing = true; snapshot.State = LogWatchState.Missing; snapshot.Status = "文件尚不存在，等待出现…"; }
+                catch (IOException error) { snapshot.State = LogWatchState.Retrying; snapshot.Error = error.Message; snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
+                catch (UnauthorizedAccessException error) { snapshot.State = LogWatchState.Retrying; snapshot.Error = error.Message; snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
+                catch (Win32Exception error) { snapshot.State = LogWatchState.Retrying; snapshot.Error = error.Message; snapshot.Status = "暂时无法读取，将自动重试：" + error.Message; }
+                return CompleteSnapshot(snapshot);
             }
+        }
+        private LogWatchSnapshot CompleteSnapshot(LogWatchSnapshot snapshot)
+        {
+            snapshot.Offset = offset; snapshot.Lines = lines.ToList();
+            if (partial.Length > 0) snapshot.Lines.Add(partial);
+            int total = snapshot.Lines.Sum(x => x.Length);
+            while (snapshot.Lines.Count > MaximumLines || total > MaximumBufferCharacters) { total -= snapshot.Lines[0].Length; snapshot.Lines.RemoveAt(0); }
+            return snapshot;
         }
         private bool BoundaryChanged(FileStream stream)
         {
@@ -144,6 +180,11 @@ namespace CodexIsland
         private static Encoding DetectEncoding(FileStream stream, out int bom)
         {
             byte[] bytes = new byte[4]; stream.Position = 0; int count = stream.Read(bytes, 0, 4); bom = 0;
+            if (count > 0 && count < 4)
+            {
+                byte[][] preambles = { new byte[] { 0xff, 0xfe, 0, 0 }, new byte[] { 0, 0, 0xfe, 0xff }, new byte[] { 0xef, 0xbb, 0xbf }, new byte[] { 0xfe, 0xff } };
+                if (preambles.Any(prefix => prefix.Length > count && prefix.Take(count).SequenceEqual(bytes.Take(count)))) return null;
+            }
             if (count >= 4 && bytes[0] == 0xff && bytes[1] == 0xfe && bytes[2] == 0 && bytes[3] == 0) { bom = 4; return new UTF32Encoding(false, false); }
             if (count >= 4 && bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0xfe && bytes[3] == 0xff) { bom = 4; return new UTF32Encoding(true, false); }
             if (count >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf) { bom = 3; return new UTF8Encoding(false); }

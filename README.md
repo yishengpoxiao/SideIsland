@@ -10,6 +10,8 @@ Dock it to any screen edge, keep useful widgets visible while collapsed, then ex
 
 [Download v1.0.0](https://github.com/yishengpoxiao/SideIsland/releases/latest) · [Build from source](docs/BUILDING.md) · [Architecture](docs/ARCHITECTURE.md)
 
+Development work after v1.0.0 adds portable log watch and other fixes. See [Unreleased improvements](docs/UNRELEASED.md); the published v1.0.0 downloads remain unchanged.
+
 ## Choose your platform
 
 | Platform | Status | Requirements | Release asset |

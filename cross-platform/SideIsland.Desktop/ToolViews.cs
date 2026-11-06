@@ -21,6 +21,7 @@ public sealed partial class IslandWindow
             case "media": RenderMedia(); break;
             case "quota": RenderQuota(); break;
             case "ports": RenderPorts(); break;
+            case "logs": RenderLogs(); break;
             case "notes": RenderNotes(); break;
             case "clipboard": RenderClipboard(); break;
             case "diff": RenderDiff(); break;
@@ -71,24 +72,12 @@ public sealed partial class IslandWindow
         body.Children.Add(Actions(AsyncButton(T("复制", "Copy"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(notes.Text ?? ""); }), Button(T("保存", "Save"), Save)));
         body.Children.Add(Hint(T("仅保存在本机跨平台版本的数据目录，不覆盖 Windows 版资料。", "Stored locally in the portable app's data folder, separate from the Windows edition.")));
     }
-    private void RenderClipboard()
-    {
-        var text = Input("clipboard", "", true); text.MinHeight = 230; body.Children.Add(text);
-        body.Children.Add(Actions(AsyncButton(T("读取文字", "Read text"), async () => { if (Clipboard is not null && !testMode) text.Text = await Clipboard.TryGetTextAsync() ?? ""; }), AsyncButton(T("复制文字", "Copy text"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(text.Text ?? ""); })));
-        body.Children.Add(Hint(T("此预览版提供主动读写。Wayland 后台剪贴板历史取决于桌面权限，不会把手动读取伪装成全局监听。", "This preview provides explicit clipboard actions. Wayland background history depends on desktop support and permissions.")));
-    }
     private void RenderText()
     {
         var input = Input("text-input", "", true); var output = Input("text-output", "", true); output.IsReadOnly = true;
         var ids = new[] { "json-pretty", "json-compact", "base64-encode", "base64-decode", "url-encode", "url-decode", "sha256", "upper", "lower", "deduplicate", "nonempty", "trim" };
         var choice = new ComboBox { ItemsSource = ids, SelectedIndex = 0, Margin = new(0, 0, 0, 6) }; body.Children.Add(input); body.Children.Add(choice);
         body.Children.Add(Actions(Button(T("处理", "Transform"), () => output.Text = TextTools.Transform(ids[choice.SelectedIndex], input.Text ?? "")), AsyncButton(T("复制结果", "Copy result"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(output.Text ?? ""); }))); body.Children.Add(output);
-    }
-    private void RenderQr()
-    {
-        var input = Input("qr", "", true); input.MaxLength = 10000; var qr = new QrCanvas { Width = 230, Height = 230, HorizontalAlignment = HorizontalAlignment.Center, IsVisible = false, Margin = new(0, 8) }; body.Children.Add(input);
-        body.Children.Add(Actions(Button(T("生成二维码", "Generate QR"), () => { qr.Code = Net.Codecrete.QrCodeGenerator.QrCode.EncodeText(input.Text ?? "", Net.Codecrete.QrCodeGenerator.QrCode.Ecc.Low); qr.IsVisible = true; }), AsyncButton(T("保存 PNG", "Save PNG"), async () => { if (qr.Code is null || testMode) return; var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = T("保存二维码", "Save QR"), SuggestedFileName = "side-island-qr.png", DefaultExtension = "png", FileTypeChoices = [new("PNG") { Patterns = ["*.png"] }] }); if (file is null) return; using var bitmap = qr.Bitmap(); await using var target = await file.OpenWriteAsync(); bitmap.Save(target, PngBitmapEncoderOptions.Default); })));
-        body.Children.Add(qr); body.Children.Add(Hint(T("单张使用标准二维码最大容量；中文和 emoji 的 UTF-8 字节会占更多容量。", "Uses the standard single-code maximum capacity. UTF-8 Chinese and emoji consume more bytes.")));
     }
     private void RenderCalculator()
     {

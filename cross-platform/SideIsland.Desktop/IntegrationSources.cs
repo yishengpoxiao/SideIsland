@@ -17,6 +17,11 @@ internal sealed record IntegrationSources(
     public Func<string, Task>? WritePortReport { get; init; }
     public Func<string, Task<string?>>? ChooseChecksumDestination { get; init; }
     public Func<string, Task>? WriteChecksumText { get; init; }
+    public Func<CancellationToken, Task<string?>>? ReadClipboardText { get; init; }
+    public Func<string, Task>? WriteClipboardText { get; init; }
+    public Func<string, Task<string?>>? ChooseQrDestination { get; init; }
+    public Func<Task<string?>>? ChooseLogPath { get; init; }
+    public ScreenPinSources? ScreenPins { get; init; }
     public Func<bool, TimeSpan, CancellationToken, Task<string?>>? SetAwake { get; init; }
     public Func<AwakeSnapshot>? ReadAwake { get; init; }
     public Func<CancellationToken, Task<VolumeSnapshot>>? ReadVolume { get; init; }

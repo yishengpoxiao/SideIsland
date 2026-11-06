@@ -9,6 +9,12 @@ using Avalonia.Styling;
 
 namespace SideIsland.Desktop;
 
+internal sealed record ScreenPinSaveSources
+{
+    public Func<CancellationToken, Task<string?>>? ChooseDestination { get; init; }
+    public Func<Bitmap, string, CancellationToken, Task>? SavePng { get; init; }
+}
+
 /// <summary>Small managed sizing model shared by the pin UI and behavior tests.</summary>
 public sealed class ScreenPinState
 {
@@ -32,13 +38,20 @@ public sealed class ScreenPinWindow : Window
     private readonly TextBlock zoomLabel, message;
     private readonly ScreenPinState state = new();
     private readonly bool english, testMode;
+    private readonly ScreenPinSaveSources? sources;
+    private readonly string? sourcePath;
+    private readonly CancellationTokenSource saveLifetime = new();
+    private readonly Button saveButton;
     private bool released, saving;
     public ScreenPinState PinState => state;
+    internal Task LatestSave { get; private set; } = Task.CompletedTask;
     private string T(string zh, string en) => english ? en : zh;
 
-    public ScreenPinWindow(Bitmap bitmap, string language = "zh", bool lightTheme = false, bool testMode = false)
+    public ScreenPinWindow(Bitmap bitmap, string language = "zh", bool lightTheme = false, bool testMode = false) : this(bitmap, language, lightTheme, testMode, null, null) { }
+    internal ScreenPinWindow(Bitmap bitmap, string language, bool lightTheme, bool testMode, ScreenPinSaveSources? sources, string? sourcePath)
     {
         this.bitmap = bitmap ?? throw new ArgumentNullException(nameof(bitmap));
+        this.sources = sources; this.sourcePath = sourcePath is null ? null : Path.GetFullPath(sourcePath);
         english = language == "en"; this.testMode = testMode;
         Title = T("截图钉屏", "Pinned image");
         WindowDecorations = WindowDecorations.None; CanResize = true; Topmost = true;
@@ -61,8 +74,8 @@ public sealed class ScreenPinWindow : Window
         var tools = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,*"), ColumnSpacing = 6 };
         zoomLabel = Label("100%"); zoomLabel.TextAlignment = TextAlignment.Center;
         var minus = Action("−", () => ChangeZoom(-1)); var plus = Action("+", () => ChangeZoom(1));
-        var save = Action(T("另存 PNG", "Save PNG"), () => _ = SaveAsync());
-        tools.Children.Add(minus); Grid.SetColumn(zoomLabel, 1); tools.Children.Add(zoomLabel); Grid.SetColumn(plus, 2); tools.Children.Add(plus); Grid.SetColumn(save, 3); tools.Children.Add(save); Grid.SetRow(tools, 1); root.Children.Add(tools);
+        saveButton = Action(T("另存 PNG", "Save PNG"), RequestSave); saveButton.Name = "pin-save";
+        tools.Children.Add(minus); Grid.SetColumn(zoomLabel, 1); tools.Children.Add(zoomLabel); Grid.SetColumn(plus, 2); tools.Children.Add(plus); Grid.SetColumn(saveButton, 3); tools.Children.Add(saveButton); Grid.SetRow(tools, 1); root.Children.Add(tools);
         image = new Image { Source = bitmap, Stretch = Stretch.Fill, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var view = new ScrollViewer { Content = image, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
         var imageFrame = new Border { Child = view, CornerRadius = new CornerRadius(10), ClipToBounds = true, Background = new SolidColorBrush(Color.Parse(lightTheme ? "#E5E5EA" : "#09090B")) };
@@ -79,13 +92,13 @@ public sealed class ScreenPinWindow : Window
         message = Label(T("拖动图片移动 · 滚轮缩放 · Esc 关闭", "Drag to move · Scroll to zoom · Esc to close"), 10); message.Opacity = .65; Grid.SetRow(message, 4); root.Children.Add(message);
         Content = new Border { Child = root, Padding = new Thickness(10), CornerRadius = new CornerRadius(16), ClipToBounds = true, Background = new SolidColorBrush(Color.Parse(lightTheme ? "#FAFAFC" : "#1C1C1E")), BorderBrush = new SolidColorBrush(Color.Parse(lightTheme ? "#DCDCE2" : "#343438")), BorderThickness = new Thickness(1) };
         var context = new ContextMenu();
-        foreach (var item in new[] { (T("适合窗口", "Fit image"), new Action(FitImage)), (T("原始大小", "Actual size"), new Action(() => { state.SetZoom(1); ApplyZoom(); })), (T("另存 PNG", "Save PNG"), new Action(() => _ = SaveAsync())), (T("关闭", "Close"), new Action(Close)) })
+        foreach (var item in new[] { (T("适合窗口", "Fit image"), new Action(FitImage)), (T("原始大小", "Actual size"), new Action(() => { state.SetZoom(1); ApplyZoom(); })), (T("另存 PNG", "Save PNG"), new Action(RequestSave)), (T("关闭", "Close"), new Action(Close)) })
         { var entry = new MenuItem { Header = item.Item1 }; entry.Click += (_, _) => item.Item2(); context.Items.Add(entry); }
         imageFrame.ContextMenu = context;
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape) { Close(); e.Handled = true; }
-            else if (e.Key == Key.S && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0) { _ = SaveAsync(); e.Handled = true; }
+            else if (e.Key == Key.S && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0) { RequestSave(); e.Handled = true; }
             else if (e.Key == Key.D0 || e.Key == Key.NumPad0) { FitImage(); e.Handled = true; }
             else if (e.Key is Key.Add or Key.OemPlus) { ChangeZoom(1); e.Handled = true; }
             else if (e.Key is Key.Subtract or Key.OemMinus) { ChangeZoom(-1); e.Handled = true; }
@@ -106,21 +119,34 @@ public sealed class ScreenPinWindow : Window
 
     public void ChangeZoom(double delta) { state.ZoomBy(delta); ApplyZoom(); }
     public void FitImage() { state.SetZoom(ScreenPinState.FitZoom(bitmap.Size.Width, bitmap.Size.Height, Math.Max(1, Bounds.Width - 24), Math.Max(1, Bounds.Height - 150))); ApplyZoom(); }
-    internal void ReleaseImage() { if (released) return; released = true; image.Source = null; if (!saving) bitmap.Dispose(); }
+    internal void ReleaseImage() { if (released) return; released = true; saveLifetime.Cancel(); image.Source = null; saveButton.IsEnabled = false; if (!saving) { bitmap.Dispose(); saveLifetime.Dispose(); } }
     private void ApplyZoom() { if (released) return; image.Width = bitmap.Size.Width * state.Zoom; image.Height = bitmap.Size.Height * state.Zoom; zoomLabel.Text = (state.Zoom * 100).ToString("0") + "%"; }
+    private void RequestSave() { if (!saving && !released) LatestSave = SaveAsync(); }
     private async Task SaveAsync()
     {
-        if (testMode || saving || released) return;
-        saving = true;
+        if ((testMode && sources?.ChooseDestination is null) || saving || released) return;
+        saving = true; saveButton.IsEnabled = false;
         try
         {
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = T("保存截图", "Save pinned image"), SuggestedFileName = "side-island-pin.png", DefaultExtension = "png", FileTypeChoices = [new FilePickerFileType("PNG") { Patterns = ["*.png"] }] });
-            if (file is null || released) return;
-            await using var target = await file.OpenWriteAsync();
-            await Task.Run(() => bitmap.Save(target, PngBitmapEncoderOptions.Default));
-            if (!released) message.Text = T("已保存 PNG", "PNG saved");
+            string? destination;
+            if (sources?.ChooseDestination is { } choose) destination = await choose(saveLifetime.Token);
+            else
+            {
+                using var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = T("另存新的 PNG", "Save a new PNG"), SuggestedFileName = "side-island-pin.png", DefaultExtension = "png", ShowOverwritePrompt = false, FileTypeChoices = [new FilePickerFileType("PNG") { Patterns = ["*.png"] }] });
+                if (file is null) return;
+                destination = file.TryGetLocalPath() ?? throw new IOException(T("请选择本地的新 PNG 文件。", "Choose a new local PNG file."));
+            }
+            if (destination is null || released) return;
+            saveLifetime.Token.ThrowIfCancellationRequested();
+            string fullPath = Path.GetFullPath(destination);
+            if (sourcePath is not null && string.Equals(fullPath, sourcePath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            { message.Text = T("请选择新文件名，不能覆盖原图片。", "Choose a new filename to keep the original image unchanged."); return; }
+            if (sources?.SavePng is { } save) await save(bitmap, fullPath, saveLifetime.Token);
+            else await Task.Run(() => ScreenPinImageFiles.SaveNew(bitmap, fullPath, saveLifetime.Token), saveLifetime.Token);
+            if (!released) message.Text = T("已另存新的 PNG", "Saved a new PNG");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { if (!released) message.Text = T("保存失败：", "Save failed: ") + exception.Message; }
-        finally { saving = false; if (released) bitmap.Dispose(); }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException) { if (!released) message.Text = T("保存失败：", "Save failed: ") + exception.Message; }
+        finally { saving = false; if (released) { bitmap.Dispose(); saveLifetime.Dispose(); } else saveButton.IsEnabled = true; }
     }
 }

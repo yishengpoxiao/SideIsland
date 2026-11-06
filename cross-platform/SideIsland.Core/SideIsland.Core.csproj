@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><Nullable>disable</Nullable><NoWarn>$(NoWarn);CS8618;CS8600;CS8601;CS8602;CS8603;CS8604;CS8625;SYSLIB0045</NoWarn></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/LogWatch.cs" Link="Shared/LogWatch.cs"/>
     <Compile Include="../../src/Shared/Calculator.cs" Link="Shared/Calculator.cs"/>
     <Compile Include="../../src/Shared/FocusTimer.cs" Link="Shared/FocusTimer.cs"/>
     <Compile Include="../../src/Shared/TextDiff.cs" Link="Shared/TextDiff.cs"/>

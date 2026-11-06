@@ -63,6 +63,7 @@ public sealed class ScreenCaptureService
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(3));
         string? owned = null;
+        bool ownsOutput = false;
         string backend = platform == CapturePlatform.MacOS ? "macOS Screenshot" : "XDG Screenshot portal";
         try
         {
@@ -83,10 +84,10 @@ public sealed class ScreenCaptureService
             if (source is not null)
             {
                 // A portal URI is borrowed. Copy it and leave the portal's file alone.
-                await ValidatePngAsync(source, timeout.Token).ConfigureAwait(false);
-                await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                byte[] snapshot = await ReadPngSnapshotAsync(source, timeout.Token).ConfigureAwait(false);
                 await using var output = new FileStream(owned, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
-                await input.CopyToAsync(output, timeout.Token).ConfigureAwait(false);
+                ownsOutput = true;
+                await output.WriteAsync(snapshot, timeout.Token).ConfigureAwait(false);
             }
             else
             {
@@ -96,6 +97,7 @@ public sealed class ScreenCaptureService
                 else if ((executable = find("gnome-screenshot")) is not null) { selected = Backend.Gnome; backend = "GNOME Screenshot"; }
                 else if ((executable = find("spectacle")) is not null) { selected = Backend.Spectacle; backend = "Spectacle"; }
                 else return new(ScreenCaptureStatus.Unavailable, null, backend, "No Screenshot portal or installed GNOME Screenshot / Spectacle is available. Open an existing PNG instead.");
+                ownsOutput = true; // This unique path is reserved for this invocation's native output.
                 var command = await run(BuildStartInfo(selected, executable, owned), timeout.Token).ConfigureAwait(false);
                 if (!File.Exists(owned))
                 {
@@ -113,7 +115,7 @@ public sealed class ScreenCaptureService
         { return new(cancellationToken.IsCancellationRequested ? ScreenCaptureStatus.Cancelled : ScreenCaptureStatus.Failed, null, backend, cancellationToken.IsCancellationRequested ? null : "Screenshot selection timed out."); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidDataException or DBusExceptionBase)
         { return new(ScreenCaptureStatus.Failed, null, backend, exception.Message); }
-        finally { if (owned is not null) new ScreenCaptureFile(owned).Dispose(); }
+        finally { if (ownsOutput && owned is not null) new ScreenCaptureFile(owned).Dispose(); }
     }
 
     internal static ProcessStartInfo BuildStartInfo(Backend backend, string executable, string output)
@@ -132,13 +134,27 @@ public sealed class ScreenCaptureService
 
     internal static async Task ValidatePngAsync(string path, CancellationToken token)
     {
-        var info = new FileInfo(path);
-        if (!info.Exists || info.Length < 33 || info.Length > MaximumPngBytes) throw new InvalidDataException("The screenshot is missing, empty or larger than 64 MB.");
         await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
         var header = new byte[24]; await input.ReadExactlyAsync(header, token).ConfigureAwait(false);
-        if (!header.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) || !header.AsSpan(12, 4).SequenceEqual("IHDR"u8))
+        ValidatePngHeader(header, input.Length);
+    }
+    internal static async Task<byte[]> ReadPngSnapshotAsync(string path, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+        long length = input.Length;
+        if (length < 33 || length > MaximumPngBytes) throw new InvalidDataException("The screenshot is missing, empty or larger than 64 MB.");
+        var bytes = new byte[(int)length]; await input.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
+        var extra = new byte[1];
+        if (await input.ReadAsync(extra, token).ConfigureAwait(false) != 0 || input.Length != length) throw new IOException("The PNG changed while it was being read. Try again.");
+        token.ThrowIfCancellationRequested(); ValidatePngHeader(bytes, length); return bytes;
+    }
+    private static void ValidatePngHeader(ReadOnlySpan<byte> header, long length)
+    {
+        if (length < 33 || length > MaximumPngBytes) throw new InvalidDataException("The screenshot is missing, empty or larger than 64 MB.");
+        if (!header[..8].SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) || !header.Slice(12, 4).SequenceEqual("IHDR"u8))
             throw new InvalidDataException("The selected file is not a PNG image.");
-        uint width = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(16, 4)), height = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(20, 4));
+        uint width = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(16, 4)), height = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(20, 4));
         if (width == 0 || height == 0 || width > 32768 || height > 32768 || (ulong)width * height > 48_000_000)
             throw new InvalidDataException("The screenshot dimensions exceed the supported limit.");
     }

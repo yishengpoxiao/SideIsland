@@ -49,6 +49,14 @@ public sealed class PortableBatchFiles : IDisposable
     private bool disposed;
     public string LastJournalPath { get; private set; } = "";
     public bool CanUndo => Volatile.Read(ref undo) is not null;
+    // Shared read-only identity boundary: reuse the audited native stat layout.
+    internal static string ReadOpenFileIdentity(SafeFileHandle handle)
+    {
+        Native.RequireSupported();
+        var stat = Native.StatHandle(handle);
+        if (!stat.Regular) throw new IOException("The selected path is not a regular file.");
+        return stat.Identity;
+    }
     public PortableBatchFiles(string dataDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);

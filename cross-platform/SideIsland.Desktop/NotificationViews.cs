@@ -39,7 +39,7 @@ public sealed partial class IslandWindow
         filter.SelectionChanged += (_, _) => { notificationFilter = (NotificationFilter)Math.Max(0, filter.SelectedIndex); RefreshNotificationRows(); };
         body.Children.Add(filter);
         var search = new TextBox { Text = notificationSearch, PlaceholderText = T("搜索应用、标题或内容", "Search app, title or message"), Margin = new(0, 0, 0, 6) };
-        search.TextChanged += (_, _) => { notificationSearch = search.Text ?? ""; RefreshNotificationRows(); }; body.Children.Add(search);
+        search.PropertyChanged += (_, change) => { if (change.Property == TextBox.TextProperty && !closing) { notificationSearch = search.Text ?? ""; RefreshNotificationRows(); } }; body.Children.Add(search);
         body.Children.Add(Actions(Button(T("全部已读", "Read all"), () => { notificationCenter!.MarkAllRead(); RefreshNotificationRows(); }), Button(T("清空消息", "Clear"), () => { notificationCenter!.Clear(); RefreshNotificationRows(); }), Button(T("接入与规则", "Sources / rules"), () => { selected = "notifications"; page = "tools"; RenderPage(); })));
         notificationRows = new StackPanel { Spacing = 2 }; body.Children.Add(notificationRows); RefreshNotificationRows();
     }
