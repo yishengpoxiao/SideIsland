@@ -10,7 +10,7 @@
 
 [下载 v1.0.0](https://github.com/yishengpoxiao/SideIsland/releases/latest) · [源码构建](docs/BUILDING.md) · [项目架构](docs/ARCHITECTURE.md)
 
-v1.0.0 之后的开发改动新增跨平台日志追踪及其他修复，见 [未发布改进](docs/UNRELEASED.md)；已发布的 v1.0.0 下载包保持不变。
+v1.0.0 之后的开发改动新增跨平台工作场景、日志追踪及其他修复，见 [未发布改进](docs/UNRELEASED.md)；已发布的 v1.0.0 下载包保持不变。
 
 ## 选择版本
 

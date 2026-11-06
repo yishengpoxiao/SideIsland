@@ -22,6 +22,7 @@
 | 批量 `batch-files` | 预览、冲突检查、原生身份校验、两阶段重命名、日志和同会话撤销 | Apple Silicon fstat／renameatx_np，Ubuntu statx／renameat2；非配合进程并发修改仍有系统边界，必须目标文件系统验证 |
 | 图片 `batch-images` | 多选、缩放、JPG 质量、PNG／JPG 转换和新位置输出 | 使用 Avalonia 跨平台解码编码，不调用 Unix 不支持的 System.Drawing |
 | 通知 `notifications` | 来源开关、应用禁用／优先级、合并、搜索、未读管理及可选历史 | Mac 仅当前可访问的 AX 通知卡片；Linux D-Bus 监测需桌面允许。不是保证读取全部应用历史的后台服务 |
+| 工作场景 `workspaces` | 本机快捷入口、手动组合启动、可选两个收起组件、逐项启动结果与取消后续请求 | Mac open／Linux xdg-open 与独立 argv；原生桌面接收仍需实测，不等同于自动场景规则。详见 [工作场景](WORKSPACES.md) |
 | 守望 `watch` | 文件／进程等待与状态 UI | 使用目标系统的进程身份和文件语义，不复制 Windows PID 假设 |
 | 日志 `logs` | 主动开始的有界末尾读取、关键词提醒、筛选／复制、清除与停止 | 复用共享编码与截断处理；已打开文件的身份通过各平台 stat 查询。单个后台读取，过时结果不回写；原生 Mac／Ubuntu 文件系统仍需实测 |
 | 唤醒 `awake` | Mac caffeinate／Linux inhibitor 子进程适配 | 只管理本应用创建的持有进程；桌面电源政策可能不接受请求 |

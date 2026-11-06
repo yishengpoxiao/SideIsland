@@ -1,4 +1,5 @@
 using CodexIsland;
+using SideIsland.Core;
 using SideIsland.Desktop.Platforms;
 
 namespace SideIsland.Desktop;
@@ -21,6 +22,9 @@ internal sealed record IntegrationSources(
     public Func<string, Task>? WriteClipboardText { get; init; }
     public Func<string, Task<string?>>? ChooseQrDestination { get; init; }
     public Func<Task<string?>>? ChooseLogPath { get; init; }
+    public Func<IReadOnlyList<PortableWorkspaceResource>, CancellationToken, Task<WorkspaceLaunchResult>>? LaunchWorkspace { get; init; }
+    public Func<PortableWorkspaceStore, PortableWorkspaceSnapshot, Task>? SaveWorkspace { get; init; }
+    public Func<string, Task<string?>>? ChooseWorkspaceTarget { get; init; }
     public ScreenPinSources? ScreenPins { get; init; }
     public Func<bool, TimeSpan, CancellationToken, Task<string?>>? SetAwake { get; init; }
     public Func<AwakeSnapshot>? ReadAwake { get; init; }

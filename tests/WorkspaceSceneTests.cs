@@ -49,6 +49,7 @@ namespace CodexIsland
                 PanelTests(directory, scene);
             }
             finally { Directory.Delete(directory, true); }
+            WorkspaceSceneRecoveryTests.Run();
             Console.WriteLine("PASS: workspace scene persistence, structured batch launch, demo isolation and save recovery tests.");
         }
         private static void PanelTests(string directory, WorkspaceScene scene)

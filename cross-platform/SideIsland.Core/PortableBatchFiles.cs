@@ -57,6 +57,26 @@ public sealed class PortableBatchFiles : IDisposable
         if (!stat.Regular) throw new IOException("The selected path is not a regular file.");
         return stat.Identity;
     }
+    // Reuse the native ABI boundary for atomic configuration commits. There is
+    // deliberately no link/copy/ordinary-rename fallback on unsupported filesystems.
+    internal static void ExchangeFiles(string left, string right)
+    {
+        Native.RequireSupported();
+        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Unix atomic exchange is unavailable on Windows.");
+        if (!Path.IsPathFullyQualified(left) || !Path.IsPathFullyQualified(right)) throw new ArgumentException("Atomic exchange requires absolute paths.");
+        int cwd = OperatingSystem.IsLinux() ? -100 : -2;
+        int result = OperatingSystem.IsLinux() ? Native.renameat2(cwd, left, cwd, right, 2) : Native.renameatx_np(cwd, left, cwd, right, 2);
+        if (result != 0) Native.ThrowLastError();
+    }
+    internal static void MoveFileNoReplace(string source, string destination)
+    {
+        Native.RequireSupported();
+        if (!Path.IsPathFullyQualified(source) || !Path.IsPathFullyQualified(destination)) throw new ArgumentException("Atomic move requires absolute paths.");
+        if (OperatingSystem.IsWindows()) { File.Move(source, destination, false); return; }
+        int cwd = OperatingSystem.IsLinux() ? -100 : -2;
+        int result = OperatingSystem.IsLinux() ? Native.renameat2(cwd, source, cwd, destination, 1) : Native.renameatx_np(cwd, source, cwd, destination, 4);
+        if (result != 0) Native.ThrowLastError();
+    }
     public PortableBatchFiles(string dataDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);

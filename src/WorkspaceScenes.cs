@@ -24,46 +24,140 @@ namespace CodexIsland
         public string Id { get; set; }
         public string Name { get; set; }
         public List<WorkspaceSceneResource> Resources { get; set; }
-        public WorkspaceScene Copy() { return new WorkspaceScene { Id = Id, Name = Name, LayoutProfileId = LayoutProfileId, Resources = (Resources ?? new List<WorkspaceSceneResource>()).Select(x => x.Copy()).ToList() }; }
+        public WorkspaceScene Copy() { return new WorkspaceScene { Id = Id, Name = Name, LayoutProfileId = LayoutProfileId, Resources = Resources == null ? null : Resources.Select(x => x == null ? null : x.Copy()).ToList() }; }
+    }
+    internal sealed class WorkspaceSceneConflictException : IOException
+    {
+        public bool DraftCommitted { get; private set; }
+        public string BackupPath { get; private set; }
+        public WorkspaceSceneConflictException(bool committed = false, string backup = null) : base(committed ? "本次场景修改已写入；保存期间出现的外部版本已保留备份。" : "场景文件已在外部更改，未覆盖外部版本。请备份修改并重新加载。") { DraftCommitted = committed; BackupPath = backup; }
     }
     internal sealed class WorkspaceSceneStore
     {
         public const int MaximumScenes = 20, MaximumResources = 30;
         private const int MaximumFileBytes = 2 * 1024 * 1024;
         private readonly string path;
-        private bool unreadablePreserved;
+        private readonly object sync = new object();
+        private readonly Action beforePublish;
+        private byte[] baseline;
+        private bool baselineKnown, baselineExists;
         public bool LoadFailed { get; private set; }
-        public WorkspaceSceneStore(string location = null) { path = Path.GetFullPath(location ?? Path.Combine(Path.GetDirectoryName(new SettingsStore().FilePath), "workspace-scenes.json")); }
+        public WorkspaceSceneStore(string location = null) : this(location, null) { }
+        internal WorkspaceSceneStore(string location, Action beforePublish) { path = Path.GetFullPath(location ?? Path.Combine(Path.GetDirectoryName(new SettingsStore().FilePath), "workspace-scenes.json")); this.beforePublish = beforePublish; }
         public List<WorkspaceScene> Load()
         {
-            LoadFailed = false; unreadablePreserved = false;
-            try
+            lock (sync)
             {
-                if (!File.Exists(path)) return new List<WorkspaceScene>();
-                if (new FileInfo(path).Length > MaximumFileBytes) throw new IOException();
-                string json = File.ReadAllText(path, new UTF8Encoding(false, true));
-                if (!json.TrimStart().StartsWith("[", StringComparison.Ordinal)) throw new ArgumentException("场景文件必须为数组。");
-                var scenes = new JavaScriptSerializer { MaxJsonLength = MaximumFileBytes, RecursionLimit = 12 }.Deserialize<List<WorkspaceScene>>(json);
-                Validate(scenes); return scenes.Select(x => x.Copy()).ToList();
+                LoadFailed = false; baselineKnown = baselineExists = false; baseline = null;
+                try
+                {
+                    bool exists; byte[] bytes = ReadCurrent(out exists);
+                    baselineKnown = true; baselineExists = exists; baseline = bytes;
+                    return exists ? Parse(bytes) : new List<WorkspaceScene>();
+                }
+                catch (IOException) { LoadFailed = true; } catch (UnauthorizedAccessException) { LoadFailed = true; }
+                catch (ArgumentException) { LoadFailed = true; } catch (InvalidOperationException) { LoadFailed = true; }
+                return new List<WorkspaceScene>();
             }
-            catch (IOException) { LoadFailed = true; } catch (UnauthorizedAccessException) { LoadFailed = true; }
-            catch (ArgumentException) { LoadFailed = true; } catch (InvalidOperationException) { LoadFailed = true; }
-            return new List<WorkspaceScene>();
         }
         public void Save(IEnumerable<WorkspaceScene> entries)
         {
             if (entries == null) throw new ArgumentNullException("entries");
-            var list = entries.ToList(); Validate(list); string json = new JavaScriptSerializer { MaxJsonLength = MaximumFileBytes, RecursionLimit = 12 }.Serialize(list);
-            byte[] bytes = new UTF8Encoding(false).GetBytes(json); if (bytes.Length > MaximumFileBytes) throw new ArgumentException("场景内容过多，请减少资源。");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)); string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
+            lock (sync)
             {
-                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { stream.Write(bytes, 0, bytes.Length); stream.Flush(true); }
-                if (LoadFailed && !unreadablePreserved && File.Exists(path)) { File.Copy(path, path + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak", false); unreadablePreserved = true; }
-                if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path); LoadFailed = false;
+                var input = entries.Take(MaximumScenes + 1).ToList(); Validate(input);
+                var list = input.Select(scene => scene.Copy()).ToList(); Validate(list); byte[] bytes = Serialize(list);
+                // Failed reads return an empty editor, not an instruction to erase the original.
+                if (LoadFailed && list.Count == 0) return;
+                bool exists; byte[] current = ReadCurrent(out exists);
+                if (!baselineKnown)
+                {
+                    if (LoadFailed && exists)
+                    {
+                        bool readable = false; try { Parse(current); readable = true; } catch (ArgumentException) { } catch (InvalidOperationException) { }
+                        if (readable) throw new WorkspaceSceneConflictException();
+                    }
+                    baselineKnown = true; baselineExists = exists; baseline = current;
+                    if (exists && !LoadFailed) { try { Parse(current); } catch (ArgumentException) { LoadFailed = true; } catch (InvalidOperationException) { LoadFailed = true; } }
+                }
+                if (exists != baselineExists || !Equal(current, baseline)) throw new WorkspaceSceneConflictException();
+                if (exists && !LoadFailed && Equal(current, bytes)) return;
+                bool recovery = LoadFailed;
+                Directory.CreateDirectory(Path.GetDirectoryName(path)); string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                string backup = exists ? path + (recovery ? ".unreadable-" : ".previous-") + Guid.NewGuid().ToString("N") + ".bak" : null;
+                bool staged = false;
+                try
+                {
+                    WriteNew(temporary, bytes); staged = true;
+                    if (beforePublish != null) beforePublish();
+                    if (exists) File.Replace(temporary, path, backup); else File.Move(temporary, path);
+                    baseline = bytes; baselineKnown = baselineExists = true; LoadFailed = false;
+                    if (backup != null)
+                    {
+                        // Capture the exact bytes displaced by the commit. A noncooperating
+                        // writer can change the target after preflight; never roll back over
+                        // a still newer edit or misreport that this draft was not written.
+                        bool matched = false;
+                        try { matched = Equal(ReadBytes(backup), current); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                        if (!matched) throw new WorkspaceSceneConflictException(true, backup);
+                        if (!recovery) DeleteOwned(backup);
+                    }
+                }
+                finally { if (staged) DeleteOwned(temporary); }
             }
-            finally { if (File.Exists(temporary)) try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         }
+        internal string SaveDraft(IEnumerable<WorkspaceScene> entries)
+        {
+            lock (sync)
+            {
+                // A recovery draft can include an unfinished/blank name. It is never
+                // loaded automatically or substituted for the active scene file.
+                byte[] bytes = Serialize(entries.Select(scene => scene.Copy()).ToList());
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                string destination = path + ".draft-" + Guid.NewGuid().ToString("N") + ".json", temporary = destination + ".tmp";
+                bool staged = false;
+                try { WriteNew(temporary, bytes); staged = true; File.Move(temporary, destination); return destination; }
+                finally { if (staged) DeleteOwned(temporary); }
+            }
+        }
+        private byte[] ReadCurrent(out bool exists)
+        {
+            try { byte[] bytes = ReadBytes(path); exists = true; return bytes; }
+            catch (FileNotFoundException) { exists = false; return null; }
+            catch (DirectoryNotFoundException) { exists = false; return null; }
+        }
+        private static byte[] ReadBytes(string file)
+        {
+            using (var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (stream.Length > MaximumFileBytes) throw new IOException("场景内容过多，请减少资源。");
+                byte[] bytes = new byte[(int)stream.Length]; int position = 0;
+                while (position < bytes.Length) { int count = stream.Read(bytes, position, bytes.Length - position); if (count == 0) throw new EndOfStreamException(); position += count; }
+                if (stream.ReadByte() != -1) throw new IOException("场景文件正在变化，请重试。");
+                return bytes;
+            }
+        }
+        private static List<WorkspaceScene> Parse(byte[] bytes)
+        {
+            string json;
+            using (var stream = new MemoryStream(bytes, false)) using (var reader = new StreamReader(stream, new UTF8Encoding(false, true), true)) json = reader.ReadToEnd();
+            if (!json.TrimStart().StartsWith("[", StringComparison.Ordinal)) throw new ArgumentException("场景文件必须为数组。");
+            var scenes = new JavaScriptSerializer { MaxJsonLength = MaximumFileBytes, RecursionLimit = 12 }.Deserialize<List<WorkspaceScene>>(json);
+            Validate(scenes); return scenes.Select(scene => scene.Copy()).ToList();
+        }
+        private static byte[] Serialize(object value)
+        {
+            byte[] bytes = new UTF8Encoding(false, true).GetBytes(new JavaScriptSerializer { MaxJsonLength = MaximumFileBytes, RecursionLimit = 12 }.Serialize(value));
+            if (bytes.Length > MaximumFileBytes) throw new ArgumentException("场景内容过多，请减少资源。"); return bytes;
+        }
+        private static bool Equal(byte[] left, byte[] right) { return ReferenceEquals(left, right) || left != null && right != null && left.SequenceEqual(right); }
+        private static void WriteNew(string file, byte[] bytes)
+        {
+            bool owned = false;
+            try { using (var stream = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { owned = true; stream.Write(bytes, 0, bytes.Length); stream.Flush(true); } }
+            catch { if (owned) DeleteOwned(file); throw; }
+        }
+        private static void DeleteOwned(string file) { try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         private static void Validate(IList<WorkspaceScene> scenes)
         {
             if (scenes == null || scenes.Count > MaximumScenes) throw new ArgumentException("最多保存 20 个场景。");
@@ -87,6 +181,7 @@ namespace CodexIsland
     {
         public int Opened { get; set; }
         public int Skipped { get; set; }
+        public bool Cancelled { get; set; }
         public readonly List<string> Errors = new List<string>();
     }
     internal static class WorkspaceSceneLaunch
@@ -131,8 +226,9 @@ namespace CodexIsland
         public static Task<WorkspaceSceneLaunchResult> RunAsync(IEnumerable<WorkspaceSceneResource> resources, bool demo, IWorkspaceSceneLaunchAdapter adapter, CancellationToken cancellation)
         {
             if (resources == null) throw new ArgumentNullException("resources"); if (adapter == null) throw new ArgumentNullException("adapter");
-            var snapshot = resources.Take(WorkspaceSceneStore.MaximumResources + 1).Select(x => x.Copy()).ToList();
+            var snapshot = resources.Take(WorkspaceSceneStore.MaximumResources + 1).Select(x => x == null ? null : x.Copy()).ToList();
             if (snapshot.Count > WorkspaceSceneStore.MaximumResources) throw new ArgumentException("每个场景最多启动 30 个资源。");
+            if (snapshot.Any(item => item == null)) throw new ArgumentException("场景数据格式无效。");
             return Task.Run(() =>
             {
                 var result = new WorkspaceSceneLaunchResult();
@@ -142,7 +238,7 @@ namespace CodexIsland
                     try { var start = CreateStartInfo(resource); if (demo || cancellation.IsCancellationRequested) result.Skipped++; else { adapter.Start(start); result.Opened++; } }
                     catch (Exception error) { result.Errors.Add(resource.Name + "：" + Explain(error)); }
                 }
-                return result;
+                result.Cancelled = cancellation.IsCancellationRequested; return result;
             });
         }
         private static string Explain(Exception error)

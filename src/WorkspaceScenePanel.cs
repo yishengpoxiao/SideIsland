@@ -24,8 +24,10 @@ namespace CodexIsland
         private readonly List<KeyValuePair<CheckBox, QuickShortcut>> importChecks = new List<KeyValuePair<CheckBox, QuickShortcut>>();
         private readonly CancellationTokenSource closing = new CancellationTokenSource();
         private readonly List<Button> launchButtons = new List<Button>();
+        private readonly Button cancelLaunch;
+        private CancellationTokenSource launchCancellation;
         private WorkspaceScene selected;
-        private bool dirty, disposed, updating, launching;
+        private bool dirty, disposed, updating, launching, saveWarning;
         private ComboBox layoutSelection;
         private Func<IEnumerable<LayoutProfile>> layoutOptions;
         private Func<string, bool> applyLayout;
@@ -67,11 +69,13 @@ namespace CodexIsland
             scenes = demo ? new List<WorkspaceScene> { new WorkspaceScene { Id = Guid.NewGuid().ToString("N"), Name = "写代码", Resources = new List<WorkspaceSceneResource> { new WorkspaceSceneResource { Name = "项目文档", Kind = "url", Target = "https://example.com/docs", Arguments = "" } } } } : store.Load();
             Children.Add(ToolStyle.Heading("工作场景启动"));
             Children.Add(ToolStyle.Hint(demo ? "演示模式 · 不启动软件、不打开网页、不保存修改。" : "将项目目录、程序和网页组成场景，点一次批量打开。最多 20 个场景，每个场景 30 个资源。"));
-            Children.Add(PanelActionLayout.Create(1, IslandWindow.Button("＋ 新建场景", NewScene))); Children.Add(status); Children.Add(sceneList);
+            Children.Add(PanelActionLayout.Create(2, IslandWindow.Button("＋ 新建场景", NewScene), IslandWindow.Button("备份修改并重新加载", ReloadScenes)));
+            cancelLaunch = IslandWindow.Button("停止启动剩余资源", CancelLaunch); cancelLaunch.IsEnabled = false; cancelLaunch.Visibility = Visibility.Collapsed; Children.Add(cancelLaunch);
+            Children.Add(status); Children.Add(sceneList);
             editor.Margin = new Thickness(0, 6, 0, 0); editor.Children.Add(ToolStyle.Heading("编辑当前场景")); editor.Children.Add(ToolStyle.Hint("场景名称")); sceneName.MaxLength = 60; editor.Children.Add(sceneName);
             sceneName.TextChanged += (s, e) => { if (updating || selected == null || disposed) return; selected.Name = sceneName.Text; dirty = true; status.Text = "名称已修改，请点击保存场景。"; };
             var actions = PanelActionLayout.Create(2,
-                IslandWindow.Button("保存场景", () => { if (TryFlush()) { RebuildScenes(); status.Text = demo ? "演示模式不保存修改。" : "场景已保存。"; } }),
+                IslandWindow.Button("保存场景", () => { if (TryFlush()) { RebuildScenes(); if (!saveWarning) status.Text = demo ? "演示模式不保存修改。" : "场景已保存。"; } }),
                 IslandWindow.Button("＋ 添加资源", () => EditResource(null))); actions.Margin = new Thickness(0, 6, 0, 6); editor.Children.Add(actions); editor.Children.Add(resourceList);
             var importBody = new StackPanel(); importBody.Children.Add(ToolStyle.Hint("勾选已在「快捷启动」中保存的入口，可复制加入当前场景。原入口不受影响。"));
             importBody.Children.Add(PanelActionLayout.Create(2, IslandWindow.Button("刷新快捷入口", RefreshShortcuts), IslandWindow.Button("加入勾选入口", ImportChecked))); importBody.Children.Add(shortcutList);
@@ -131,7 +135,7 @@ namespace CodexIsland
         }
         private void ImportChecked()
         {
-            if (selected == null) return; int added = 0, duplicate = 0; bool full = false;
+            if (disposed || selected == null) return; int added = 0, duplicate = 0; bool full = false;
             foreach (var pair in importChecks.Where(x => x.Key.IsChecked == true))
             {
                 WorkspaceSceneResource item;
@@ -140,7 +144,7 @@ namespace CodexIsland
                 if (selected.Resources.Count >= WorkspaceSceneStore.MaximumResources) { full = true; break; }
                 selected.Resources.Add(item); added++; pair.Key.IsChecked = false;
             }
-            if (added > 0) { dirty = true; if (TryFlush()) status.Text = "已加入 " + added + " 个入口" + (duplicate > 0 ? "，已跳过重复入口。" : "。") + (full ? " 每个场景最多 30 个资源，其余入口未加入。" : "") + (demo ? " 演示模式未保存。" : ""); }
+            if (added > 0) { dirty = true; if (TryFlush() && !saveWarning) status.Text = "已加入 " + added + " 个入口" + (duplicate > 0 ? "，已跳过重复入口。" : "。") + (full ? " 每个场景最多 30 个资源，其余入口未加入。" : "") + (demo ? " 演示模式未保存。" : ""); }
             else if (full) status.Text = "每个场景最多 30 个资源，入口未加入。";
             else if (duplicate > 0) status.Text = "勾选入口已在当前场景中。";
             else status.Text = "请先勾选要加入的快捷入口。";
@@ -176,6 +180,8 @@ namespace CodexIsland
                 try
                 {
                     await Task.Run(() => WorkspaceSceneLaunch.CreateStartInfo(candidate)); if (disposed || !window.IsVisible) return;
+                    if (destination == null || !scenes.Contains(destination) || (existing != null && !destination.Resources.Contains(existing))) { error.Text = "目标场景或资源已被移除，此修改未应用。"; return; }
+                    if (existing == null && destination.Resources.Count >= WorkspaceSceneStore.MaximumResources) { error.Text = "每个场景最多 30 个资源。"; return; }
                     if (existing == null) destination.Resources.Add(candidate); else { existing.Name = candidate.Name; existing.Kind = candidate.Kind; existing.Target = candidate.Target; existing.Arguments = candidate.Arguments; }
                     dirty = true; bool saved = TryFlush(); RebuildResources(); RebuildScenes(); if (saved) window.DialogResult = true; else { error.Text = "保存失败；此修改已保留在本次运行中，可直接关闭窗口后在场景页重试保存。"; existing = existing ?? candidate; }
                 }
@@ -187,35 +193,71 @@ namespace CodexIsland
         {
             if (disposed || launching) return false;
             var matches = scenes.Where(scene => String.Equals(scene.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
-            return matches.Count == 1 && await LaunchSceneAsync(matches[0]) != null;
+            if (matches.Count != 1) return false;
+            var result = await LaunchSceneAsync(matches[0]); return !disposed && result != null && !result.Cancelled;
         }
         internal async Task<WorkspaceSceneLaunchResult> LaunchSceneAsync(WorkspaceScene scene)
         {
             if (disposed || launching || scene == null) return null;
-            bool requestedLayout = !String.IsNullOrEmpty(scene.LayoutProfileId);
-            bool layoutApplied = requestedLayout && applyLayout != null && applyLayout(scene.LayoutProfileId);
-            if (scene.Resources.Count == 0) { status.Text = layoutApplied ? "已应用场景布局。" : "场景还没有资源，请先添加。"; return new WorkspaceSceneLaunchResult(); }
-            launching = true; foreach (var button in launchButtons) button.IsEnabled = false; status.Text = "正在启动「" + scene.Name + "」…";
+            // Set the guard and freeze all inputs before invoking a layout callback:
+            // that callback can rebuild the UI, mutate scenes, close, or reenter.
+            launching = true; foreach (var button in launchButtons) button.IsEnabled = false;
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(closing.Token); launchCancellation = cancellation;
+            cancelLaunch.Visibility = Visibility.Visible; cancelLaunch.IsEnabled = true;
             try
             {
-                WorkspaceSceneLaunchResult result = await WorkspaceSceneLaunch.RunAsync(scene.Resources, demo, launcher, closing.Token);
+                var snapshot = scene.Copy();
+                if (snapshot.Resources == null) throw new ArgumentException("场景数据格式无效。");
+                bool requestedLayout = !String.IsNullOrEmpty(snapshot.LayoutProfileId);
+                bool layoutApplied = requestedLayout && applyLayout != null && applyLayout(snapshot.LayoutProfileId);
+                if (disposed) return null;
+                if (snapshot.Resources.Count == 0) { status.Text = layoutApplied ? "已应用场景布局。" : "场景还没有资源，请先添加。"; return new WorkspaceSceneLaunchResult { Cancelled = cancellation.IsCancellationRequested }; }
+                status.Text = "正在启动「" + snapshot.Name + "」…";
+                WorkspaceSceneLaunchResult result = await WorkspaceSceneLaunch.RunAsync(snapshot.Resources, demo, launcher, cancellation.Token);
                 if (requestedLayout && !layoutApplied) result.Errors.Add(UiLocalization.Localize("关联的布局不存在，资源启动继续执行。"));
-                if (!disposed) status.Text = (demo ? "演示模式，已检查 " + result.Skipped + " 个资源，未实际打开。" : "已启动 " + result.Opened + " 个资源。") + (result.Errors.Count == 0 ? "" : "\n" + String.Join("\n", result.Errors));
+                if (!disposed) status.Text = (result.Cancelled ? "已停止启动剩余资源。" : demo ? "演示模式，已检查 " + result.Skipped + " 个资源，未实际打开。" : "已启动 " + result.Opened + " 个资源。") + (result.Errors.Count == 0 ? "" : "\n" + String.Join("\n", result.Errors));
                 return result;
             }
             catch (Exception) { if (!disposed) status.Text = "场景启动失败，请检查资源后重试。"; return null; }
-            finally { launching = false; if (!disposed) foreach (var button in launchButtons) button.IsEnabled = true; }
+            finally { if (ReferenceEquals(launchCancellation, cancellation)) launchCancellation = null; cancellation.Dispose(); launching = false; if (!disposed) { foreach (var button in launchButtons) button.IsEnabled = true; cancelLaunch.IsEnabled = false; cancelLaunch.Visibility = Visibility.Collapsed; } }
         }
-        private void Persist() { if (TryFlush()) status.Text = demo ? "演示模式不保存修改。" : "场景已保存。"; }
+        private void CancelLaunch() { if (disposed || launchCancellation == null) return; launchCancellation.Cancel(); cancelLaunch.IsEnabled = false; status.Text = "正在停止启动；已打开的资源不会被关闭。"; }
+        private void ReloadScenes()
+        {
+            if (disposed) return;
+            if (demo) { status.Text = "演示模式不读取场景文件。"; return; }
+            string draft = null, selectedId = selected == null ? null : selected.Id;
+            try
+            {
+                if (dirty) draft = store.SaveDraft(scenes);
+                var loaded = store.Load();
+                if (store.LoadFailed) { UiLocalization.Text(status, "重新加载失败，当前编辑仍保留在本次运行中。" + (draft == null ? "" : "\n场景草稿备份：" + draft)); return; }
+                scenes.Clear(); scenes.AddRange(loaded); dirty = false; saveWarning = false;
+                SelectScene(scenes.FirstOrDefault(item => item.Id == selectedId) ?? scenes.FirstOrDefault()); RebuildScenes();
+                UiLocalization.Text(status, "场景已重新加载。" + (draft == null ? "" : "\n场景草稿备份：" + draft));
+            }
+            catch (ArgumentException) { status.Text = "备份或重新加载失败，当前编辑仍保留在本次运行中。"; }
+            catch (IOException) { status.Text = "备份或重新加载失败，当前编辑仍保留在本次运行中。"; }
+            catch (UnauthorizedAccessException) { status.Text = "备份或重新加载失败，当前编辑仍保留在本次运行中。"; }
+            catch (InvalidOperationException) { status.Text = "备份或重新加载失败，当前编辑仍保留在本次运行中。"; }
+        }
+        private void Persist() { if (TryFlush() && !saveWarning) status.Text = demo ? "演示模式不保存修改。" : "场景已保存。"; }
         public bool TryFlush()
         {
+            saveWarning = false;
+            if (disposed) return !dirty;
             if (demo || !dirty) return true;
-            try { store.Save(scenes); dirty = false; return true; }
+            try { store.Save(scenes); dirty = false; if (store.LoadFailed) { saveWarning = true; status.Text = "原场景文件尚未恢复，未用空列表覆盖。"; } return true; }
+            catch (WorkspaceSceneConflictException error)
+            {
+                saveWarning = true; UiLocalization.Text(status, error.Message + (error.BackupPath == null ? "" : "\n" + error.BackupPath));
+                if (error.DraftCommitted) { dirty = false; return true; }
+            }
             catch (ArgumentException error) { status.Text = error.Message + " 修改仍保留在本次运行中。"; }
             catch (IOException) { status.Text = "场景保存失败；修改仍保留在本次运行中，请检查目录权限后重试保存。"; }
             catch (UnauthorizedAccessException) { status.Text = "场景保存失败；修改仍保留在本次运行中，请检查目录权限后重试保存。"; }
             return false;
         }
-        public void Dispose() { if (disposed) return; TryFlush(); disposed = true; closing.Cancel(); }
+        public void Dispose() { if (disposed) return; TryFlush(); disposed = true; closing.Cancel(); cancelLaunch.IsEnabled = false; foreach (var button in launchButtons) button.IsEnabled = false; }
     }
 }

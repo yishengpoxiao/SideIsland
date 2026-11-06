@@ -11,6 +11,19 @@ namespace CodexIsland
 场景内容过多，请减少资源。|Workspace content is too large. Reduce the number of resources.
 场景数据格式无效。|Invalid workspace data format.
 场景文件必须为数组。|The workspace file must contain an array.
+场景文件已在外部更改，未覆盖外部版本。请备份修改并重新加载。|The workspace file changed externally. Back up your edits and reload; the external version was not overwritten.
+本次场景修改已写入；保存期间出现的外部版本已保留备份。|Your workspace edits were saved. A concurrent external version was preserved in a backup.
+备份修改并重新加载|Back up edits & reload
+停止启动剩余资源|Stop remaining launches
+已停止启动剩余资源。|Remaining launches were stopped.
+正在停止启动；已打开的资源不会被关闭。|Stopping remaining launches. Already opened resources will stay open.
+目标场景或资源已被移除，此修改未应用。|The workspace or resource was removed. This edit was not applied.
+演示模式不读取场景文件。|Demo mode does not read workspace files.
+重新加载失败，当前编辑仍保留在本次运行中。|Reload failed. Your current edits remain in this session.
+场景已重新加载。|Workspaces reloaded.
+原场景文件尚未恢复，未用空列表覆盖。|The original workspace file is still unreadable. It was not replaced with an empty list.
+备份或重新加载失败，当前编辑仍保留在本次运行中。|Backup or reload failed. Your current edits remain in this session.
+场景文件正在变化，请重试。|The workspace file is changing. Try again.
 此时间因夏令时跳转而不存在，请输入另一时间或选择 UTC。|This local time does not exist because of daylight saving. Enter another time or select UTC.
 此时间在夏令时回拨时出现两次，请换算并输入明确的 UTC 时间。|This local time occurs twice during the daylight-saving change. Enter an unambiguous UTC time.
 存在不支持的字符或多余内容。|Unsupported characters or extra content.
@@ -147,6 +160,10 @@ Windows 无法打开此资源，请检查关联程序或应用安装。|Windows 
 本地时间 · |Local time · 
 本地时区：|Local time zone: 
 状态 |Status ");
+            Add("场景草稿备份：", "Workspace draft backup: ");
+            Pattern("重新加载失败，当前编辑仍保留在本次运行中。\n场景草稿备份：{0}", "Reload failed. Your current edits remain in this session.\nWorkspace draft backup: {0}");
+            Pattern("场景已重新加载。\n场景草稿备份：{0}", "Workspaces reloaded.\nWorkspace draft backup: {0}");
+            Pattern("本次场景修改已写入；保存期间出现的外部版本已保留备份。\n{0}", "Your workspace edits were saved. A concurrent external version was preserved in a backup.\n{0}");
             Pattern("{0} 天", "{0} days"); Pattern("{0} 天 {1} 时 {2} 分", "{0}d {1}h {2}m"); Pattern("{0} 小时 {1} 分", "{0}h {1}m");
             Pattern("已收纳 {0} 项", "{0} items on the shelf");
             Pattern("{0} 个非空行 · {1} 个可选项 · 已合并 {2} 个重复行", "{0} nonempty lines · {1} choices · {2} duplicate lines merged");

@@ -75,7 +75,7 @@ public sealed partial class IslandWindow : Window
         Activated += (_, _) => { if (!closing) Place(); };
         PositionChanged += (_, _) => { if (dragging) hover.Stop(); };
         SizeChanged += (_, _) => { if (!placementBusy && expanded && !realNotch && IsVisible) { prefs.ExpandedWidth = Bounds.Width; prefs.ExpandedHeight = Bounds.Height; prefs.Normalize(); QueueSave(); } };
-        Closing += (_, e) => { if (!TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); logController.Dispose(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
+        Closing += (_, e) => { if (!TryPrepareWorkspaceClose() || !TryPrepareBatchClose()) { e.Cancel = true; return; } closing = true; Screens.Changed -= OnScreensChanged; pulse.Stop(); hover.Stop(); collapse.Stop(); saveDebounce.Stop(); Save(); StopMediaRequests(); StopQuotaRequests(); logController.Dispose(); lifetime.Cancel(); DisposeNotifications(); batchEngine?.Dispose(); taskApi.Dispose(); platform.Dispose(); };
         pulse.Tick += async (_, _) => await TickAsync();
         focus.SetCountdown(TimeSpan.FromMinutes(prefs.FocusMinutes), "Focus", true);
         focus.Completed += () => Notice(T("专注已完成", "Focus completed"), T("休息一下，再开始下一轮。", "Take a break before the next session."));
@@ -90,7 +90,7 @@ public sealed partial class IslandWindow : Window
         ("diff", "文字对照", "Text comparison"), ("text", "文字工具", "Text tools"), ("qr", "二维码传话", "QR transfer"),
         ("calculator", "计算器", "Calculator"), ("random", "密码与随机", "Password / random"),
         ("hash", "文件校验", "File checksums"), ("screen-pin", "截图钉屏", "Screenshot pin"), ("batch-files", "批量文件", "Batch files"), ("batch-images", "批量图片", "Batch images"),
-        ("notifications", "通知接入与规则", "Notification sources & rules"), ("watch", "任务守望", "Task watch"), ("awake", "保持唤醒", "Keep awake"),
+        ("notifications", "通知接入与规则", "Notification sources & rules"), ("workspaces", "工作场景", "Workspaces"), ("watch", "任务守望", "Task watch"), ("awake", "保持唤醒", "Keep awake"),
         ("volume", "系统音量", "System volume"), ("activities", "任务动态", "Task activities"), ("settings", "布局与平台设置", "Layout & platform")
     ];
     private string T(string zh, string en) => prefs.Language == "en" ? en : zh;

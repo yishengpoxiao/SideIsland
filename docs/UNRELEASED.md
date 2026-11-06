@@ -4,6 +4,20 @@
 
 These are development changes after v1.0.0. The published v1.0.0 archives have not been replaced.
 
+## Portable workspaces and scene recovery
+
+The preview now has a Workspaces tool: save website, folder and program shortcuts, group them into a scene, optionally select two compact widgets, and launch the saved group. Each program argument has its own literal field. Results distinguish hand-off, failure, skipped items and unconfirmed requests. Cancellation skips remaining launches without closing opened applications. Saved scenes and unsaved editor drafts are kept separate. See [usage, limits and platform behavior](../cross-platform/docs/WORKSPACES.md).
+
+Workspace disk operations run off the UI thread. A controlled blocked write originally stalled a language/theme rebuild for 1,598 ms because rendering read a property protected by the disk lock. Rendering now uses captured state, with a regression that verifies the header rebuild completes while the writer remains blocked. Recovery failures now preserve the actual backup path and distinguish a confirmed saved draft from an uncertain file requiring reload. Compact action rows have equal widths/heights, including wrapped English captions.
+
+The portable store validates bounded, versioned JSON and detects stale external edits. On Unix it uses native atomic exchange and no-replace rename, since the [.NET 10.0.13 Unix implementation](https://raw.githubusercontent.com/dotnet/runtime/v10.0.13/src/libraries/System.Private.CoreLib/src/System/IO/FileSystem.Unix.cs) can separate backup capture from replacement, or check a new destination before an ordinary rename. Unsupported operations fail without a non-atomic fallback. If a swap or backup rename takes effect before reporting an error, displaced content remains recoverable and the actual committed state is checked. Foreign native execution is still unverified.
+
+Windows scenes also detect external file changes, preserve the exact unreadable version during recovery and offer **Back up edits & reload**. Saving a rescue draft accepts unfinished names. Launches freeze their resource list and set their pending guard before applying layout callbacks, preventing reentry from launching a second or mutated batch. Controlled pre-fix reproducers, not just reruns, captured each fault.
+
+The final two complete preview rounds passed with unchanged inputs and zero build warnings: 4,416 general layouts, 60,864 action-caption checks and 192 populated workspace layouts. Each round includes 108 workspace-store checks, 31 launcher checks and 4,640 workspace UI assertions. The general matrix now explicitly waits for the asynchronous workspace editor; earlier rounds sometimes measured its loading placeholder, and their original records remain preserved. Both final rounds report identical per-tool caption totals. English light and Chinese dark workspace renders were inspected. These tests do not establish native Mac/Ubuntu launch, filesystem or desktop behavior.
+
+Nine related Windows suites passed on the final source with no automatic retry and unchanged source/assembly hashes, including 74 new scene checks. This selected regression does not replace the outstanding full Windows native alpha-hit check, which remains obstructed by the lock screen.
+
 ## Portable log watch and asynchronous tool fixes
 
 The preview now includes a log watch tool: explicitly start a local file tail, including a future path, follow or filter retained lines, copy the displayed content, clear the view and stop. New keyword matches produce local notifications subject to app exclusions; initial history is not replayed. The bounded reader supports UTF-8 and BOM-marked UTF-16/UTF-32, replacement/truncation detection and a single background worker. Slow OS reads cannot accumulate workers, and obsolete callbacks cannot update a stopped, restarted or closed session. Native Mac/Ubuntu filesystem validation remains outstanding. See [limits and behavior](../cross-platform/docs/LOG-WATCH.md).
@@ -66,6 +80,16 @@ Native macOS and Ubuntu execution still requires target-device validation. Autom
 - Full logs, first-failure evidence and source hashes remain in ignored local diagnostic directories. Generated executables and packages are not included in source commits.
 
 ## 中文说明
+
+跨平台开发版新增“工作场景”：保存网页、目录和软件入口，组合启动，并可联动两个收起组件。每个软件参数独立输入，保留空值、引号和换行。逐项显示交接、失败、跳过或未确认结果；取消只跳过剩余请求，不终止已打开软件。启动使用已保存内容，未保存草稿保持独立。详见 [操作与限制](../cross-platform/docs/WORKSPACES.md#简体中文)。
+
+修复场景保存期间切换语言／主题卡顿：受控测试发现界面读取被磁盘操作持有的锁，首轮阻塞 1,598 毫秒；现在界面读取已捕获状态，并验证在后台写入仍被阻塞时可完成重建。恢复异常保留真实备份路径，区分已确认写入与必须重新加载的未知结果；同组按钮统一宽高，英文换行后仍对齐。
+
+Mac／Linux 场景存储改用原生原子交换及不覆盖重命名，修复 .NET Unix 先备份／检查再重命名的并发窗口。不支持时明确失败；操作实际成功却返回错误时仍保留被替换的文件，并核验真正的提交状态。Windows 工作场景同步修复外部编辑被覆盖、恢复失败后备份状态提前推进，以及布局回调重入导致重复／变化后启动；新增“备份编辑并重新加载”，可救援未完成的草稿。首次失败与修复前复现均已保留。
+
+第六批最终连续两轮跨平台完整回归通过，输入哈希不变、编译零警告：4,416 个常规布局、60,864 项按钮文字检查、192 个填充工作场景布局；每轮包含 108 项场景存储检查、31 项启动器检查、4,640 项场景 UI 断言。总布局矩阵现明确等待异步编辑区加载，避免把加载提示当作完整页面；较早两轮的原始统计保留，最终两轮逐工具按钮计数一致。英文亮色和中文暗色场景渲染图已实际查看；这些检查不代表 Mac／Ubuntu 原生启动、文件系统或桌面实测通过。
+
+最终源码另通过 9 套相关 Windows 回归，包含 74 项新增场景检查，无自动复跑、源码及程序集哈希不变。这是专项回归；完整 Windows 原生透明点击项目仍被锁屏遮挡，未标记通过。
 
 这些是 v1.0.0 之后的开发改动，已发布的 v1.0.0 安装包保持不变。
 

@@ -6,12 +6,13 @@ English | [简体中文](README.zh-CN.md)
 
 ## What is included
 
-The current development interface provides 22 entries: focus, music, Codex usage, ports, log watch, notes, clipboard, text comparison, text tools, QR transfer, calculator, random tools, checksums, screenshot pins, batch files, batch images, notifications, task watch, keep awake, system volume, task activities and settings. The published v1.0.0 preview has 21 entries; new work is described in [Unreleased](../docs/UNRELEASED.md). English/Chinese switching and light/dark themes are available. This is a port in progress, with a smaller scope than the Windows edition; see [porting status](docs/PORTING-STATUS.md).
+The current development interface provides 23 entries: focus, music, Codex usage, ports, log watch, notes, clipboard, text comparison, text tools, QR transfer, calculator, random tools, checksums, screenshot pins, batch files, batch images, notifications, workspaces, task watch, keep awake, system volume, task activities and settings. The published v1.0.0 preview has 21 entries; new work is described in [Unreleased](../docs/UNRELEASED.md). English/Chinese switching and light/dark themes are available. This is a port in progress, with a smaller scope than the Windows edition; see [porting status](docs/PORTING-STATUS.md).
 
 - **Notifications:** app exclusions, priority, repeat merging, search, unread management and optional local history. Mac reads only accessible visible notification cards after explicit Accessibility opt-in. Ubuntu monitors new session D-Bus `Notify` calls when permitted. A token-protected local HTTP input is off by default. It does not replace the system notification service or promise hidden message history. [Details](docs/NOTIFICATIONS.md).
 - **Screenshot pins:** system area selection on Mac; the Screenshot portal on Ubuntu, with installed GNOME Screenshot/Spectacle fallbacks only when the interface is unavailable. Drag, zoom, adjust opacity, close or save a new PNG. Cancellation and permission denial do not launch another picker. [Details](docs/SCREEN-PIN.md).
 - **Batch files/images:** preview names and conflicts before renaming; retain an operation journal and support same-session undo when file identity/content still matches. Resize multiple images, change JPEG quality and export PNG/JPEG to a new output location. [Details](docs/BATCH-FILES.md).
 - **Log watch:** explicitly start a local file tail, including a future file path; filter and copy shown lines, clear the view, and receive local keyword alerts for new content. Watches continue while collapsed or on another page and stop when the app exits. Initial history does not alert. [Limits and behavior](docs/LOG-WATCH.md).
+- **Workspaces:** save website, folder and program shortcuts, group them into a workspace, optionally choose two compact widgets, and launch the saved group with one click. Cancel skips remaining launches and leaves opened apps running. [Saving, recovery and platform limits](docs/WORKSPACES.md).
 
 Implemented adapters and managed tests do not establish that native permissions, capture, notifications or filesystem calls have passed on the destination system.
 
@@ -33,7 +34,7 @@ The target is Ubuntu 22.04 or newer on x64/arm64; native library compatibility m
 
 Music uses MPRIS players through `playerctl`; audio uses PulseAudio-compatible `pactl`, including PipeWire configurations providing that interface. Missing commands are reported rather than installed or replaced with fake state. Port details depend on system commands, procfs and process permissions.
 
-Clipboard actions are explicit desktop reads/writes. They are not a universal Wayland background history service. Full work scenarios, screenshot annotation and the Windows media/lyrics feature set are not yet equivalent.
+Clipboard actions are explicit desktop reads/writes. They are not a universal Wayland background history service. Automatic workspace rules, screenshot annotation and the Windows media/lyrics feature set are not yet equivalent.
 
 ## Build and package
 

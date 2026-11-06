@@ -34,6 +34,7 @@ public sealed partial class IslandWindow
             case "batch-files": RenderBatchFiles(); break;
             case "batch-images": RenderBatchImages(); break;
             case "notifications": RenderNotificationSettings(); break;
+            case "workspaces": RenderWorkspaces(); break;
             case "watch": RenderWatch(); break;
             case "awake": RenderAwake(); break;
             case "volume": RenderVolume(); break;

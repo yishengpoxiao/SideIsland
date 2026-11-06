@@ -17,7 +17,7 @@ internal static class LayoutTests
     {
         var folder = Path.Combine(Path.GetTempPath(), "side-island-layout-" + Guid.NewGuid().ToString("N"));
         if (artifactDirectory is not null) Directory.CreateDirectory(artifactDirectory);
-        int cases = 0, captions = 0; var issues = new List<string>();
+        int cases = 0, captions = 0; var issues = new List<string>(); var toolCaptions = new Dictionary<string, int>();
         try
         {
             foreach (string language in new[] { "zh", "en" }) foreach (bool light in new[] { false, true })
@@ -30,6 +30,17 @@ internal static class LayoutTests
                 foreach (var tool in IslandWindow.Tools)
                 {
                     window.SelectToolForTest(tool.Id); window.Width = width; window.Height = height;
+                    if (tool.Id == "workspaces")
+                    {
+                        // Loading is intentionally asynchronous. Do not count the
+                        // temporary loading label as a completed editor layout.
+                        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                        while (!window.LatestWorkspaceLoad.IsCompleted && elapsed.ElapsedMilliseconds < 10000) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(2); }
+                        if (!window.LatestWorkspaceLoad.IsCompleted) throw new TimeoutException("Workspace layout did not finish loading.");
+                        window.LatestWorkspaceLoad.GetAwaiter().GetResult();
+                        if (!window.GetVisualDescendants().OfType<Button>().Any(button => button.Name == "workspace-save-scene"))
+                            throw new InvalidOperationException("Workspace layout must inspect the loaded editor.");
+                    }
                     Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
                     AppearanceTestActions.Assert(window, language, light);
                     var context = $"{language}/{light}/{width}x{height}/{scale}/{tool.Id}";
@@ -37,7 +48,7 @@ internal static class LayoutTests
                     if (!window.IsVisible || window.Bounds.Width <= 0) issues.Add(context + " invalid window");
                     foreach (var button in window.GetVisualDescendants().OfType<Button>().Where(b => b.IsVisible && b.Bounds.Width > 0))
                     {
-                        captions++; var label = button.Content as TextBlock;
+                        captions++; toolCaptions[tool.Id] = toolCaptions.GetValueOrDefault(tool.Id) + 1; var label = button.Content as TextBlock;
                         if (label is not null && label.Bounds.Height > button.Bounds.Height + 2) issues.Add(context + " cropped action " + label.Text);
                         var p = button.TranslatePoint(default, window); if (p is Point pt && (pt.X < -2 || pt.X + button.Bounds.Width > window.Bounds.Width + 2)) issues.Add(context + " horizontal action overflow");
                     }
@@ -64,7 +75,7 @@ internal static class LayoutTests
             }
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
-        if (artifactDirectory is not null) File.WriteAllText(Path.Combine(artifactDirectory, "layout-result.json"), JsonSerializer.Serialize(new { Cases = cases, Captions = captions, Issues = issues }, new JsonSerializerOptions { WriteIndented = true }));
+        if (artifactDirectory is not null) File.WriteAllText(Path.Combine(artifactDirectory, "layout-result.json"), JsonSerializer.Serialize(new { Cases = cases, Captions = captions, ToolCaptions = toolCaptions, Issues = issues }, new JsonSerializerOptions { WriteIndented = true }));
         if (issues.Count > 0) throw new InvalidOperationException(String.Join("\n", issues.Take(50)));
         Console.WriteLine($"PASS: {cases} actual Avalonia tool layouts, {captions} action captions; zh/en, light/dark, three widths, two heights, 100/125/150/200% headless DPI changes and scroll-end access. Native desktop DPI/compositor behavior is not implied.");
     }
