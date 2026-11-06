@@ -16,7 +16,7 @@ internal static class PreferencePersistenceTests
         Directory.CreateDirectory(root);
         try
         {
-            PreferencesRoundtrip(root); Recovery(root); Protection(root); CommitOutcomes(root); Cleanup(root); ResponsiveState(root);
+            PreferencesRoundtrip(root); BomCompatibility(root); Recovery(root); Protection(root); CommitOutcomes(root); Cleanup(root); ResponsiveState(root);
             Console.WriteLine("PASS: " + checks + " preference/state persistence checks; explicit recovery, exact external-version protection, bounded reads, ordinary-backup cleanup, partial-write diagnostics and nonblocking immutable UI state. Owned temporary files only; exchange adapter fixtures do not establish native Mac/Linux validation.");
         }
         finally { Directory.Delete(root, true); }
@@ -84,6 +84,37 @@ internal static class PreferencePersistenceTests
         Reject(() => store.RecoverAndSave(draft), StateFileProblemCode.LoadFailed);
         File.WriteAllText(path, "null"); Check(ReferenceEquals(store.Reload(draft), draft) && store.PersistenceStatus.LoadFailed, "JSON null cannot crash load or erase in-memory draft");
         File.Delete(path); var empty = store.Reload(draft); Check(empty.Notes == "" && !store.PersistenceStatus.LoadFailed, "explicit reload of deleted file returns defaults without writing");
+    }
+    private static void BomCompatibility(string root)
+    {
+        byte[] signature = [0xEF, 0xBB, 0xBF];
+        byte[] validJson = Bytes("{\"Notes\":\"original 中文😀 · \\uFEFF\",\"Language\":\"en\",\"FocusMinutes\":37}");
+        foreach (bool withBom in new[] { false, true })
+        {
+            string directory = DirectoryFor(root), path = Path.Combine(directory, "preferences.json");
+            byte[] input = withBom ? [.. signature, .. validJson] : validJson; File.WriteAllBytes(path, input);
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Check(JsonSerializer.Deserialize<Preferences>(stream)!.FocusMinutes == 37, "old stream positive control accepts supported UTF-8 file");
+            var store = new PreferenceStore(directory); var value = store.Load();
+            Check(!store.PersistenceStatus.LoadFailed && value.Notes == "original 中文😀 · \uFEFF" && value.Language == "en" && value.FocusMinutes == 37, "real UTF-8 preferences preserve values with or without a leading BOM");
+            Check(File.ReadAllBytes(path).SequenceEqual(input), "loading a BOM file leaves its exact original bytes untouched");
+            value.Notes = "edited after loading"; store.Save(value);
+            Check(new PreferenceStore(directory).Load().Notes == value.Notes && !store.PersistenceStatus.Dirty, "saving over a BOM baseline succeeds and remains readable");
+        }
+        foreach (byte[] malformed in new byte[][]
+        {
+            [.. signature, .. signature, .. validJson], [0xEF], [0xEF, 0xBB], signature,
+            [.. signature, .. Bytes("{\"Notes\": BROKEN}")], [.. signature, .. Bytes("null")],
+            [.. Bytes(" "), .. signature, .. validJson],
+            [.. signature, .. Bytes("{\"Notes\":\""), 0xC3, 0x28, .. Bytes("\"}")]
+        })
+        {
+            string directory = DirectoryFor(root), path = Path.Combine(directory, "preferences.json"); File.WriteAllBytes(path, malformed);
+            var store = new PreferenceStore(directory); var fallback = store.Load();
+            Check(store.PersistenceStatus.LoadFailed && store.PersistenceStatus.CanRecover && fallback.Notes == "", "malformed BOM/JSON/UTF-8 is still rejected with an exact recoverable baseline");
+            Reject(() => store.Save(fallback), StateFileProblemCode.LoadFailed);
+            Check(File.ReadAllBytes(path).SequenceEqual(malformed), "failed parsing and automatic save preserve malformed bytes exactly");
+        }
     }
     private static void Protection(string root)
     {

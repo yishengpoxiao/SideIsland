@@ -103,7 +103,10 @@ public sealed class PreferenceStore
     }
     private static Preferences Decode(byte[] bytes)
     {
-        var value = JsonSerializer.Deserialize<Preferences>(bytes) ?? throw new JsonException("Invalid preferences.");
+        // Preserve the former stream reader's UTF-8 BOM compatibility. Only a
+        // single complete leading signature is allowed; JSON stays strict.
+        int offset = bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ? 3 : 0;
+        var value = JsonSerializer.Deserialize<Preferences>(bytes.AsSpan(offset)) ?? throw new JsonException("Invalid preferences.");
         value.Normalize(); return value;
     }
 }
