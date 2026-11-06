@@ -9,7 +9,8 @@ public sealed class FilePublicationException(FilePublicationState state, string 
 {
     public FilePublicationState State { get; } = state;
     public string TargetPath { get; } = targetPath;
-    public string? RetainedTemporaryPath { get; } = retainedTemporaryPath;
+    public string? RetainedTemporaryPath { get; private set; } = retainedTemporaryPath;
+    internal void RecordRetainedTemporary(string path) => RetainedTemporaryPath = path;
     public override string ToString() => base.ToString() + Environment.NewLine +
         "Publication state: " + State + Environment.NewLine + "Target path: " + TargetPath + Environment.NewLine +
         "Retained staging path: " + (RetainedTemporaryPath ?? "(none confirmed)");
@@ -44,6 +45,7 @@ public static class PortableFilePublication
         Stamp? staged = null;
         bool attempted = false, preserve = false;
         FileStream? output = null;
+        FilePublicationException? failure = null;
         try
         {
             output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read | FileShare.Delete, 65536, FileOptions.SequentialScan);
@@ -73,14 +75,15 @@ public static class PortableFilePublication
                     "The native publication completed, but the current destination could not be verified.");
             }
         }
-        catch (FilePublicationException) { throw; }
+        catch (FilePublicationException error) { failure = error; throw; }
         catch (OperationCanceledException) when (!attempted) { throw; }
         catch (Exception error) when (Expected(error))
         {
             preserve = attempted;
-            throw Failure(attempted ? FilePublicationState.OutcomeUnknown : FilePublicationState.NotPublished, target,
+            failure = Failure(attempted ? FilePublicationState.OutcomeUnknown : FilePublicationState.NotPublished, target,
                 attempted && staged is not null && Inspect(temporary, staged) == Probe.Same ? temporary : null,
                 attempted ? "The save outcome could not be confirmed." : "The staging file could not be prepared; no file was published.", error);
+            throw failure;
         }
         finally
         {
@@ -95,7 +98,18 @@ public static class PortableFilePublication
                     bool same = staged is not null ? Inspect(temporary, staged) == Probe.Same : OwnIdentity(temporary, ownedIdentity);
                     if (same) File.Delete(temporary);
                 }
-                catch (Exception cleanupError) when (Expected(cleanupError)) { }
+                catch (Exception cleanupError) when (Expected(cleanupError))
+                {
+                    // A sharing violation can prevent both the native rename
+                    // and deletion. Report only a still-recognized owned file;
+                    // never advertise an unchecked replacement as recovery data.
+                    try
+                    {
+                        bool same = staged is not null ? Inspect(temporary, staged) == Probe.Same : OwnIdentity(temporary, ownedIdentity);
+                        if (same) failure?.RecordRetainedTemporary(temporary);
+                    }
+                    catch (Exception inspectionError) when (Expected(inspectionError)) { }
+                }
             }
         }
     }

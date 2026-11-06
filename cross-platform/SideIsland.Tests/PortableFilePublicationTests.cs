@@ -12,7 +12,7 @@ internal static class PortableFilePublicationTests
         string directory = Path.Combine(Path.GetTempPath(), "side-island-publication-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         try
         {
-            Basics(directory); Collisions(directory); Cancellation(directory); NativeErrors(directory); UnknownOutcomes(directory); Manifest(directory);
+            Basics(directory); Collisions(directory); Cancellation(directory); NativeErrors(directory); CleanupFailures(directory); UnknownOutcomes(directory); Manifest(directory);
             Console.WriteLine("PASS: " + checks + " exclusive publication checks; actual owned files, directory/symlink collisions, cancellation, success-before-error, unknown-result retention and whole-manifest publisher integration. Mac/Linux native execution is not implied.");
         }
         finally { Directory.Delete(directory, true); }
@@ -85,6 +85,34 @@ internal static class PortableFilePublicationTests
         target = Path.Combine(directory, "copied-not-moved.bin");
         Expect(() => PortableFilePublication.WriteNew(target, stream => stream.WriteByte(8), default, (source, destination) => { File.Copy(source, destination, false); throw new IOException("owned foreign inode with matching bytes"); }), FilePublicationState.NotPublished);
         Check(File.ReadAllBytes(target).SequenceEqual(new byte[] { 8 }), "equal bytes in a different identity cannot masquerade as our publication or be deleted");
+    }
+    private static void CleanupFailures(string directory)
+    {
+        if (!OperatingSystem.IsWindows()) return; // Real Windows sharing semantics, not an emulated Unix claim.
+        foreach (bool encoderFailure in new[] { false, true })
+        {
+            string target = Path.Combine(directory, encoderFailure ? "cleanup-encoder.bin" : "cleanup-native.bin"); string? staging = null; FileStream? held = null;
+            try
+            {
+                var error = Expect(() => PortableFilePublication.WriteNew(target, stream =>
+                {
+                    stream.WriteByte(42); stream.Flush();
+                    if (encoderFailure)
+                    {
+                        staging = ((FileStream)stream).Name; held = new FileStream(staging, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        throw new IOException("owned interrupted encoder");
+                    }
+                }, default, (source, destination) =>
+                {
+                    staging = source;
+                    held = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    PortableBatchFiles.MoveFileNoReplace(source, destination);
+                }), FilePublicationState.NotPublished);
+                Check(!File.Exists(target) && staging is not null && File.ReadAllBytes(staging).SequenceEqual(new byte[] { 42 }), "actual sharing failure retains owned staging after " + (encoderFailure ? "interrupted encoding" : "failed publication"));
+                Check(error.RetainedTemporaryPath == staging && error.ToString().Contains(staging!, StringComparison.Ordinal), "failed cleanup reports the confirmed retained path in the exception and local diagnostics");
+            }
+            finally { held?.Dispose(); if (staging is not null) File.Delete(staging); }
+        }
     }
     private static void UnknownOutcomes(string directory)
     {
