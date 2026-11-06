@@ -29,7 +29,7 @@ public sealed class Preferences
     public void Normalize()
     {
         Language = Language == "en" ? "en" : "zh";
-        if (!Enum.TryParse<DockEdge>(Dock, out _)) Dock = "Auto";
+        if (!Enum.GetNames<DockEdge>().Contains(Dock, StringComparer.Ordinal)) Dock = "Auto";
         HoverDelayMs = Math.Clamp(HoverDelayMs, 100, 5000);
         ExpandedWidth = double.IsFinite(ExpandedWidth) ? Math.Clamp(ExpandedWidth, 320, 900) : 480;
         ExpandedHeight = double.IsFinite(ExpandedHeight) ? Math.Clamp(ExpandedHeight, 360, 900) : 640;
@@ -45,6 +45,11 @@ public sealed class Preferences
 
 public sealed class PreferenceStore
 {
+    // JSON escapes can take six bytes per UTF-16 code unit. The notes editor
+    // accepts 60,000 code units, so the previous 256 KiB read limit rejected
+    // valid Chinese and emoji notes written by this store itself.
+    private const int MaximumBytes = 1024 * 1024;
+    private bool unreadable;
     public string DirectoryPath { get; }
     public string FilePath => Path.Combine(DirectoryPath, "preferences.json");
     public PreferenceStore(string? explicitDirectory = null)
@@ -56,14 +61,41 @@ public sealed class PreferenceStore
     }
     public Preferences Load()
     {
-        try { if (new FileInfo(FilePath).Length > 256 * 1024) return new(); var value = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(FilePath)) ?? new(); value.Normalize(); return value; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return new(); }
+        try
+        {
+            if (!File.Exists(FilePath)) return new();
+            using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (stream.Length > MaximumBytes) throw new InvalidDataException("Preferences exceed 1 MiB.");
+            var value = JsonSerializer.Deserialize<Preferences>(stream) ?? throw new JsonException("Invalid preferences.");
+            value.Normalize(); unreadable = false; return value;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException)
+        { unreadable = true; return new(); }
     }
     public void Save(Preferences value)
     {
-        value.Normalize(); Directory.CreateDirectory(DirectoryPath);
+        ArgumentNullException.ThrowIfNull(value);
+        value.Normalize();
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions { WriteIndented = true });
+        // Never replace a usable file with data that the next startup rejects.
+        if (bytes.Length > MaximumBytes) throw new InvalidDataException("Preferences exceed 1 MiB; previous saved preferences have been retained.");
+        Directory.CreateDirectory(DirectoryPath);
         var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { File.WriteAllText(temporary, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true })); File.Move(temporary, FilePath, true); }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        try
+        {
+            if (unreadable && File.Exists(FilePath))
+            {
+                File.Copy(FilePath, FilePath + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak");
+                unreadable = false;
+            }
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
+            File.Move(temporary, FilePath, true);
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

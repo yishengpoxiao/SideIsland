@@ -22,10 +22,10 @@ namespace CodexIsland
         private readonly object gate = new object();
         private readonly List<string> lines = new List<string>();
         private readonly Func<DateTime> clock;
-        private string path, fileIdentity, partial = "", lastPartialAlert = "";
+        private string path, fileIdentity, partial = "";
         private long offset;
         private int characters;
-        private bool initialized, previousCarriageReturn, disposed;
+        private bool initialized, previousCarriageReturn, partialMatched, disposed;
         private byte[] boundary = new byte[0];
         private Decoder decoder;
         private string[] keywords = new string[0];
@@ -42,9 +42,9 @@ namespace CodexIsland
         {
             var entries = (value ?? "").Split(new[] { ',', ';', '\r', '\n', '，', '；' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (entries.Length > 20 || entries.Any(x => x.Length > 100)) throw new ArgumentException("最多 20 个关键词，每个最多 100 字。");
-            lock (gate) keywords = entries;
+            lock (gate) { keywords = entries; partialMatched = Matches(partial); }
         }
-        public void Clear() { lock (gate) { lines.Clear(); partial = ""; characters = 0; previousCarriageReturn = false; } }
+        public void Clear() { lock (gate) { lines.Clear(); partial = ""; characters = 0; previousCarriageReturn = false; partialMatched = false; } }
         public LogWatchSnapshot Read()
         {
             lock (gate)
@@ -58,19 +58,22 @@ namespace CodexIsland
                         string identity = Identity(stream.SafeFileHandle);
                         bool replaced = initialized && fileIdentity != identity;
                         bool truncated = initialized && (stream.Length < offset || (!replaced && BoundaryChanged(stream)));
-                        bool initial = !initialized || replaced || truncated || (offset == 0 && stream.Length > 0);
+                        bool initial = !initialized || replaced || truncated;
+                        // An empty file has already established the live boundary. Its
+                        // first append still needs BOM detection, but is new log data.
+                        bool firstAppend = !initial && offset == 0 && stream.Length > 0;
                         bool backlog = !initial && stream.Length - offset > MaximumReadBytes * 8L;
-                        if (initial || backlog)
+                        if (initial || firstAppend || backlog)
                         {
                             int bom; Encoding encoding = DetectEncoding(stream, out bom);
                             long start = Math.Max(bom, stream.Length - MaximumReadBytes);
                             int unit = encoding.CodePage == 1200 || encoding.CodePage == 1201 ? 2 : encoding.CodePage == 12000 || encoding.CodePage == 12001 ? 4 : 1;
                             start -= (start - bom) % unit;
-                            offset = start; decoder = encoding.GetDecoder(); partial = ""; previousCarriageReturn = false;
+                            offset = start; decoder = encoding.GetDecoder(); partial = ""; previousCarriageReturn = false; partialMatched = false;
                             if (initial) { lines.Clear(); characters = 0; }
                             snapshot.Reset = replaced || truncated || backlog;
                             stream.Position = offset;
-                            ReadChunk(stream, start > bom, false, snapshot);
+                            ReadChunk(stream, start > bom, firstAppend, snapshot);
                             initialized = true; fileIdentity = identity;
                             snapshot.Status = backlog ? "文件增长较快，已跳到末尾。" : replaced ? "日志已轮换，正在读取新文件。" : truncated ? "日志已截断，已重新读取。" : "正在监测新增日志。";
                         }
@@ -120,13 +123,16 @@ namespace CodexIsland
                 previousCarriageReturn = value == '\r';
                 if (value == '\r' || value == '\n')
                 {
-                    if (!skipFirstLine) { AppendLine(partial); if (allowAlert && Matches(partial)) hits.Add(partial); }
-                    skipFirstLine = false; partial = ""; lastPartialAlert = "";
+                    if (!skipFirstLine) { AppendLine(partial); if (allowAlert && !partialMatched && Matches(partial)) hits.Add(partial); }
+                    skipFirstLine = false; partial = ""; partialMatched = false;
                 }
                 else if (partial.Length < MaximumLineLength) partial += value;
             }
             if (skipFirstLine) partial = "";
-            if (allowAlert && partial != lastPartialAlert && Matches(partial)) { hits.Add(partial); lastPartialAlert = partial; }
+            // A logical line is considered once, including a historical unfinished
+            // line. Empty polls, later suffixes, and its eventual newline must not
+            // replay the same error after the notification throttle expires.
+            if (Matches(partial)) { if (allowAlert && !partialMatched) hits.Add(partial); partialMatched = true; }
             if (hits.Count > 0 && clock() - lastAlertUtc >= TimeSpan.FromSeconds(10)) { lastAlertUtc = clock(); snapshot.Alert = String.Join("\n", hits.Take(3).Select(x => x.Length > 200 ? x.Substring(0, 200) + "…" : x)); }
         }
         private bool Matches(string line) { return line.Length > 0 && keywords.Any(x => line.IndexOf(x, StringComparison.OrdinalIgnoreCase) >= 0); }

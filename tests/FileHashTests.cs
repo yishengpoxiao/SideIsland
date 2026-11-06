@@ -6,7 +6,9 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace CodexIsland
@@ -21,6 +23,7 @@ namespace CodexIsland
             string expected; Check(FileHashTools.TryNormalizeExpected("  " + Hash("abc", "SHA256").ToUpperInvariant() + "\r\n", "SHA256", out expected) && expected == Hash("abc", "SHA256"), "normalize expected hash");
             Check(!FileHashTools.TryNormalizeExpected(new string('x', 64), "SHA256", out expected), "reject nonhex");
             Check(!FileHashTools.TryNormalizeExpected(new string('a', 128), "SHA256", out expected), "reject wrong algorithm length");
+            ManifestTests();
             string path = Path.Combine(Path.GetTempPath(), "island-hash-" + Guid.NewGuid().ToString("N") + ".bin");
             try
             {
@@ -38,7 +41,36 @@ namespace CodexIsland
             }
             finally { if (File.Exists(path)) File.Delete(path); }
             PanelTests();
-            Console.WriteLine("PASS: SHA256/SHA512 vectors, file streaming, real async controls, comparison, cancellation, disposal and IO recovery.");
+            ManifestLayoutTests();
+            Console.WriteLine("PASS: SHA256/SHA512 vectors, GNU/BSD manifest matching, ambiguity and size bounds, file streaming, real async controls, comparison, cancellation, disposal and IO recovery.");
+        }
+
+        private static void ManifestTests()
+        {
+            string digest = Hash("abc", "SHA256"), other = Hash("def", "SHA256"), expected, error;
+            Check(FileHashTools.TryResolveExpected(digest.ToUpperInvariant(), "SHA256", null, out expected, out error) && expected == digest, "raw checksum does not need a filename");
+            string manifest = "\uFEFF# release checksums\r\n" + other + "  other.zip\r\n" + digest.ToUpperInvariant() + " *发布 包.zip\r\n";
+            Check(FileHashTools.TryResolveExpected(manifest, "SHA256", "C:\\downloads\\发布 包.zip", out expected, out error) && expected == digest, "GNU binary list selects exact Unicode basename across platforms");
+            Check(FileHashTools.TryResolveExpected(digest + "  build/app.zip\n" + digest + "  build/app.zip", "SHA256", "/tmp/app.zip", out expected, out error), "identical duplicate entries agree");
+            Check(!FileHashTools.TryResolveExpected(digest + "  one/app.zip\n" + digest + "  two/app.zip", "SHA256", "app.zip", out expected, out error) && expected == null && error == "ambiguous", "distinct paths with same basename remain ambiguous even with identical hashes");
+            Check(!FileHashTools.TryResolveExpected(digest + "  app.zip\n" + other + "  app.zip", "SHA256", "app.zip", out expected, out error) && expected == null && error == "ambiguous", "conflicting values cannot produce false success");
+            Check(!FileHashTools.TryResolveExpected(manifest, "SHA256", "missing.zip", out expected, out error) && error == "file-missing", "unmatched file cannot use first list entry");
+            Check(!FileHashTools.TryResolveExpected(manifest, "SHA256", null, out expected, out error) && error == "file-required", "list requires explicit selected filename");
+            Check(!FileHashTools.TryResolveExpected(digest + "  App.zip", "SHA256", "app.zip", out expected, out error) && error == "file-missing", "filename matching remains case sensitive");
+            Check(FileHashTools.TryResolveExpected("SHA256 (folder/my (file).zip) = " + digest, "SHA256", "my (file).zip", out expected, out error) && expected == digest, "BSD tagged list supports spaces and parentheses");
+            string sha512 = Hash("abc", "SHA512");
+            Check(FileHashTools.TryResolveExpected(sha512 + "  app.zip", "SHA512", "app.zip", out expected, out error) && expected == sha512, "GNU SHA512 list");
+            Check(FileHashTools.TryResolveExpected("SHA512 (app.zip) = " + sha512, "SHA512", "app.zip", out expected, out error) && expected == sha512, "BSD SHA512 list");
+            Check(!FileHashTools.TryResolveExpected("SHA512 (app.zip) = " + sha512, "SHA256", "app.zip", out expected, out error) && error == "manifest", "wrong selected algorithm rejected");
+            Check(!FileHashTools.TryResolveExpected(digest + "  app.zip\nmalformed", "SHA256", "app.zip", out expected, out error) && expected == null && error == "manifest", "malformed later rows cannot be ignored after a match");
+            Check(!FileHashTools.TryResolveExpected("\\" + digest + "  odd\\nname", "SHA256", "odd\\nname", out expected, out error) && error == "manifest", "unsupported escaped GNU filenames are rejected");
+            Check(!FileHashTools.TryResolveExpected(new string('x', FileHashTools.MaximumManifestLength + 1), "SHA256", "app.zip", out expected, out error) && error == "too-large", "manifest character bound");
+            Check(!FileHashTools.TryResolveExpected(String.Join("\n", Enumerable.Repeat("# comment", 1025)), "SHA256", "app.zip", out expected, out error) && error == "too-large", "manifest line bound");
+            Check(!FileHashTools.TryResolveExpected(digest + "  app.zip ", "SHA256", "app.zip", out expected, out error) && error == "file-missing", "significant trailing filename space cannot match a different file");
+            Check(FileHashTools.TryResolveExpected(digest + "  app.zip ", "SHA256", "app.zip ", out expected, out error) && expected == digest, "trailing filename space is preserved verbatim");
+            Check(!FileHashTools.TryResolveExpected(digest + "  app.zip" + new string(' ', FileHashTools.MaximumManifestLength), "SHA256", "app.zip", out expected, out error) && error == "too-large", "raw padded payload cannot evade character limit");
+            Check(!FileHashTools.TryResolveExpected(new string('\n', 1025) + digest + "  app.zip", "SHA256", "app.zip", out expected, out error) && error == "too-large", "leading blank lines cannot evade line bound");
+            Check(!FileHashTools.TryResolveExpected(digest + new string('\n', 1025), "SHA256", null, out expected, out error) && error == "too-large", "raw checksum cannot bypass physical line bound");
         }
 
         private static void PanelTests()
@@ -58,6 +90,9 @@ namespace CodexIsland
                     Complete(panel.Calculate());
                     Check(output.Text == Hash("Side Island demo", "SHA256") && copy.IsEnabled && Field<ProgressBar>(panel, "progress").Value == 100, "async demo calculation publishes SHA256 result and final progress");
                     Check(comparison.Text.Contains("✓"), "comparison accepts uppercase digest and surrounding whitespace");
+                    expected.Text = Hash("another download", "SHA256") + "  another.zip\n" + output.Text + "  Side Island demo";
+                    Check(comparison.Text.Contains("✓"), "real panel matches selected sample in pasted manifest");
+                    expected.Text = output.Text + "  wrong.zip"; Check(!comparison.Text.Contains("✓") && comparison.Text.Contains("没有"), "a valid digest for another filename is not accepted");
                     Invoke(panel, "Copy"); Check(Field<TextBlock>(panel, "status").Text.Contains("不修改剪贴板"), "demo copy never writes the real clipboard");
                     expected.Text = new string('0', 64); Check(comparison.Text.Contains("不一致"), "different valid digest reports mismatch");
                     expected.Text = new string('x', 64); Check(comparison.Text.Contains("十六进制"), "invalid digest is format failure rather than mismatch");
@@ -117,6 +152,48 @@ namespace CodexIsland
                 if (File.Exists(largeSource)) File.Delete(largeSource);
             }
         }
+        private static void ManifestLayoutTests()
+        {
+            string language = UiLocalization.Language, theme = UiTheme.Name;
+            using (var panel = new FileHashPanel(true))
+            {
+                var scroll = new ScrollViewer { Content = panel, Padding = new Thickness(12), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+                var window = new Window { Content = scroll, Width = 320, Height = 520, ShowActivated = false, ShowInTaskbar = false };
+                try
+                {
+                    AppAppearance.Register(window); window.Show();
+                    var expected = Field<TextBox>(panel, "expected"); var comparison = Field<TextBlock>(panel, "comparison");
+                    string digest = Hash("Side Island demo", "SHA256");
+                    string content = String.Join("\n", Enumerable.Range(0, 20).Select(i => digest + "  文档 archive " + i + ".zip")) + "\n" + digest + "  first/Side Island demo\n" + digest + "  second/Side Island demo";
+                    expected.Text = content;
+                    foreach (string lang in new[] { "zh", "en" })
+                    foreach (string appearance in new[] { "light", "dark" })
+                    foreach (int width in new[] { 320, 480, 760 })
+                    {
+                        window.Width = width; AppAppearance.Configure(lang, appearance); window.UpdateLayout(); PumpLayout(); window.UpdateLayout();
+                        Check(expected.Text == content && expected.AcceptsReturn && expected.MaxLength == 0, "appearance changes preserve full untruncated manifest");
+                        Check(expected.ActualHeight <= 103 && expected.ExtentHeight > expected.ViewportHeight, "multiline manifest stays compact and scrolls");
+                        Check(comparison.Text == UiLocalization.Localize("清单中存在同名文件或冲突校验值，请仅保留目标记录。"), "conflict status follows live language selection");
+                        var formatted = new FormattedText(comparison.Text, UiLocalization.Culture, FlowDirection.LeftToRight, new Typeface(comparison.FontFamily, comparison.FontStyle, comparison.FontWeight, comparison.FontStretch), comparison.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(comparison).PixelsPerDip) { MaxTextWidth = Math.Max(1, comparison.ActualWidth) };
+                        Check(comparison.ActualHeight + 2 >= formatted.Height, "long conflict status wraps without vertical cropping");
+                        foreach (FrameworkElement control in panel.Children)
+                        {
+                            Point point = control.TranslatePoint(new Point(), panel);
+                            Check(point.X >= -1 && point.X + control.ActualWidth <= panel.ActualWidth + 1, "populated checksum controls remain within narrow page");
+                        }
+                        expected.ScrollToHome(); window.UpdateLayout();
+                        Rect first = expected.GetRectFromCharacterIndex(0);
+                        Check(!first.IsEmpty && first.Top >= -1 && first.Bottom <= expected.ActualHeight + 1, "first manifest glyph remains visible");
+                        expected.ScrollToEnd(); window.UpdateLayout();
+                        Rect last = expected.GetRectFromCharacterIndex(expected.Text.Length - 1);
+                        Check(!last.IsEmpty && last.Top >= -1 && last.Bottom <= expected.ActualHeight + 1, "last manifest glyph reachable without cropping");
+                    }
+                    Console.WriteLine("PASS: 12 populated checksum layouts, zh/en, light/dark, 320/480/760 widths; wrapped conflict text, unmodified manifest and reachable first/last glyphs.");
+                }
+                finally { window.Close(); AppAppearance.Configure(language, theme); }
+            }
+        }
+        private static void PumpLayout() { var frame = new DispatcherFrame(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false)); Dispatcher.PushFrame(frame); }
         private static T Field<T>(object target, string name) { return (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target); }
         private static void Invoke(object target, string name) { target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(target, null); }
         private static void SetFile(FileHashPanel panel, string path) { panel.GetType().GetMethod("SetFile", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(panel, new object[] { path }); }

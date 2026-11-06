@@ -121,12 +121,6 @@ public sealed partial class IslandWindow
         var length = new NumericUpDown { Minimum = 8, Maximum = 128, Value = 20, FormatString = "0" }; var result = Input("random-result", "", true); result.IsReadOnly = true; body.Children.Add(Hint(T("密码长度", "Password length"))); body.Children.Add(length);
         body.Children.Add(Actions(Button(T("生成密码", "Generate password"), () => result.Text = RandomTools.Password(new PasswordOptions { Length = (int)(length.Value ?? 20), Uppercase = true, Lowercase = true, Digits = true, Symbols = true })), AsyncButton(T("复制", "Copy"), async () => { if (Clipboard is not null && !testMode) await Clipboard.SetTextAsync(result.Text ?? ""); }))); body.Children.Add(result);
     }
-    private void RenderHash()
-    {
-        var path = Input("hash-path"); var result = Input("hash-result", "", true); result.IsReadOnly = true; body.Children.Add(path);
-        body.Children.Add(Actions(AsyncButton(T("选择文件", "Choose file"), async () => { if (testMode) return; var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = false, Title = T("选择校验文件", "Choose a file") }); if (files.Count > 0) path.Text = files[0].TryGetLocalPath() ?? ""; }), AsyncButton("SHA-256", async () => { var value = path.Text ?? ""; result.Text = await Task.Run(() => FileHashTools.ComputeFile(value, "SHA256", lifetime.Token), lifetime.Token); })));
-        body.Children.Add(result);
-    }
     private readonly List<(string Id, string Target, bool Process, int Pid, DateTime? Start)> watches = new();
     private readonly HashSet<string> watchedDone = new();
     private void RenderWatch()

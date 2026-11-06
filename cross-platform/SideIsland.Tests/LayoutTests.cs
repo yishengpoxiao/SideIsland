@@ -55,9 +55,9 @@ internal static class LayoutTests
                             }
                     }
                     if (artifactDirectory is not null && height == 720 &&
-                        (scale == 1 && width == 480 && language == "zh" && !light && tool.Id is "focus" or "settings" or "media" or "qr" ||
-                         width == 320 && language == "en" && light && tool.Id is "screen-pin" or "notifications" or "batch-files" or "batch-images"))
-                    { AvaloniaHeadlessPlatform.ForceRenderTimerTick(2); Thread.Sleep(220); Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(3); using var image = new RenderTargetBitmap(new((int)Math.Round(width * scale), (int)Math.Round(height * scale)), new(96 * scale, 96 * scale)); image.Render(window); image.Save(Path.Combine(artifactDirectory, tool.Id + "-" + scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".png"), PngBitmapEncoderOptions.Default); }
+                        (scale == 1 && width == 480 && language == "zh" && !light && tool.Id is "focus" or "settings" or "media" or "qr" or "hash" ||
+                         width == 320 && language == "en" && light && tool.Id is "screen-pin" or "notifications" or "batch-files" or "batch-images" or "hash"))
+                    { AvaloniaHeadlessPlatform.ForceRenderTimerTick(2); Thread.Sleep(220); Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(3); using var image = new RenderTargetBitmap(new((int)Math.Round(width * scale), (int)Math.Round(height * scale)), new(96 * scale, 96 * scale)); image.Render(window); image.Save(Path.Combine(artifactDirectory, tool.Id + (tool.Id == "hash" ? "-" + language + "-" + width : "") + "-" + scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".png"), PngBitmapEncoderOptions.Default); }
                     cases++;
                 }
                 window.Close(); Dispatcher.UIThread.RunJobs();

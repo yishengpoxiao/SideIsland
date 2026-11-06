@@ -20,7 +20,43 @@ internal static class SharedCoreTests
         var hub = new TaskActivityHub(); hub.Publish(new() { Id = "test", Title = "真实任务", Progress = null }); Check(hub.Current.Progress is null, "unknown progress is never fabricated"); hub.Publish(new() { Id = "test", Title = "真实任务", State = "completed" }); Check(hub.Current.Progress == 100, "completion semantics");
         var password = RandomTools.Password(new PasswordOptions { Length = 8 }); Check(password.Length == 8 && password.Any(char.IsUpper) && password.Any(char.IsLower) && password.Any(char.IsDigit) && password.Any(c => RandomTools.Symbols.Contains(c)), "portable OS-backed secure password minimum and groups");
         var folder = Path.Combine(Path.GetTempPath(), "side-island-core-" + Guid.NewGuid().ToString("N"));
-        try { var store = new PreferenceStore(folder); var prefs = new Preferences { Notes = "User text · Edit 中文", HoverDelayMs = -1, ExpandedWidth = double.NaN, Slot1 = "invalid" }; store.Save(prefs); var restored = store.Load(); Check(restored.Notes == prefs.Notes && restored.HoverDelayMs == 100 && restored.ExpandedWidth == 480 && restored.Slot1 == "codex-week", "portable preference validation and persistence"); }
+        try
+        {
+            var store = new PreferenceStore(folder);
+            var prefs = new Preferences { Notes = "User text · Edit 中文", HoverDelayMs = -1, ExpandedWidth = double.NaN, Slot1 = "invalid" };
+            store.Save(prefs); var restored = store.Load();
+            Check(restored.Notes == prefs.Notes && restored.HoverDelayMs == 100 && restored.ExpandedWidth == 480 && restored.Slot1 == "codex-week", "portable preference validation and persistence");
+            foreach (string notes in new[] { new string('中', 60000), string.Concat(Enumerable.Repeat("😀", 30000)), new string('x', 60000) })
+            {
+                prefs.Notes = notes; prefs.Language = "en"; prefs.FocusMinutes = 47; prefs.LightTheme = true;
+                store.Save(prefs); restored = new PreferenceStore(folder).Load();
+                Check(restored.Notes == notes && restored.Language == "en" && restored.FocusMinutes == 47 && restored.LightTheme, "maximum-length notes survive restart without resetting unrelated preferences");
+            }
+            foreach (string invalidDock in new[] { "99", "-1", "Top, Bottom", "unknown" })
+            {
+                prefs.Dock = invalidDock; store.Save(prefs); restored = store.Load();
+                Check(restored.Dock == "Auto", "undefined dock values cannot reach native placement");
+            }
+            byte[] previous = File.ReadAllBytes(store.FilePath); prefs.CodexPath = new string('x', 1024 * 1024 + 1);
+            bool rejected = false; try { store.Save(prefs); } catch (InvalidDataException) { rejected = true; }
+            Check(rejected && File.ReadAllBytes(store.FilePath).SequenceEqual(previous), "oversized save preserves the last usable file");
+            const string malformed = "{\"Notes\":\"recoverable original\", BROKEN";
+            File.WriteAllText(store.FilePath, malformed); var recovery = new PreferenceStore(folder); var defaults = recovery.Load();
+            recovery.Save(defaults); recovery.Save(defaults);
+            var backups = Directory.GetFiles(folder, "preferences.json.unreadable-*.bak");
+            Check(backups.Length == 1 && File.ReadAllText(backups[0]) == malformed && new PreferenceStore(folder).Load().FocusMinutes == 25, "unreadable preferences preserved exactly once before recovery save");
+            Check(Directory.GetFiles(folder, "*.tmp").Length == 0, "preference writes leave no temporary files");
+            string digest = new string('a', 64), resolved, error;
+            Check(!FileHashTools.TryResolveExpected(digest + "  download.zip ", "SHA256", "download.zip", out resolved, out error) && error == "file-missing", "manifest trailing filename space is significant and cannot verify a different name");
+            Check(FileHashTools.TryResolveExpected(digest + "  download.zip ", "SHA256", "download.zip ", out resolved, out error) && resolved == digest, "manifest preserves exact trailing filename space");
+            if (!OperatingSystem.IsWindows())
+            {
+                string literal = Path.Combine(folder, "literal\\name.txt"); File.WriteAllText(literal, "Unix filename fixture");
+                string actual = FileHashTools.ComputeFile(literal, "SHA256", default);
+                Check(FileHashTools.TryResolveExpected(actual + "  literal\\name.txt", "SHA256", literal, out resolved, out error) && resolved == actual, "Unix backslash is a literal part of the real selected basename");
+                Check(!FileHashTools.TryResolveExpected(actual + "  directory/name.txt", "SHA256", literal, out resolved, out error) && error == "file-missing", "Unix literal-backslash filename cannot match a slash-separated different name");
+            }
+        }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
         Console.WriteLine("PASS: reused C# calculator/text/diff/QR/focus/task models, modern JSON boundary and isolated preference persistence.");
     }

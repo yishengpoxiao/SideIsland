@@ -9,6 +9,65 @@ namespace CodexIsland
 {
     internal static class FileHashTools
     {
+        public const int MaximumManifestLength = 131072;
+
+        // Read text only: filenames in a checksum list are never opened. Match
+        // the selected basename exactly so a different download is not verified.
+        public static bool TryResolveExpected(string input, string algorithm, string fileName, out string expected, out string error)
+        {
+            expected = null; error = null;
+            string text = input ?? "";
+            if (text.Length > MaximumManifestLength) { error = "too-large"; return false; }
+            if (text.StartsWith("\uFEFF", StringComparison.Ordinal)) text = text.Substring(1);
+            string digest;
+            // Count physical lines before normalization, including blank lines.
+            int physicalLines = text.Length == 0 ? 0 : 1;
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] == '\n' || (text[i] == '\r' && (i + 1 == text.Length || text[i + 1] != '\n')))
+                    if (i + 1 < text.Length && ++physicalLines > 1024) { error = "too-large"; return false; }
+            }
+            if (TryNormalizeExpected(text, algorithm, out digest)) { expected = digest; return true; }
+            if (text.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }) < 0) { error = "digest"; return false; }
+            int length = algorithm == "SHA256" ? 64 : algorithm == "SHA512" ? 128 : 0;
+            if (length == 0) { error = "digest"; return false; }
+            string selected = Basename(fileName ?? "") ?? "";
+            string matchedName = null, matchedHash = null;
+            using (var reader = new StringReader(text))
+            {
+                string line; int count = 0;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (++count > 1024) { error = "too-large"; return false; }
+                    if (String.IsNullOrWhiteSpace(line) || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                    string name = null, hash = null;
+                    if (line.Length > length + 2 && line[length] == ' ' && (line[length + 1] == ' ' || line[length + 1] == '*'))
+                    { hash = line.Substring(0, length); name = line.Substring(length + 2); }
+                    else if (line.StartsWith(algorithm + " (", StringComparison.Ordinal))
+                    {
+                        int end = line.LastIndexOf(") = ", StringComparison.Ordinal);
+                        if (end > algorithm.Length + 2) { name = line.Substring(algorithm.Length + 2, end - algorithm.Length - 2); hash = line.Substring(end + 4); }
+                    }
+                    if (String.IsNullOrEmpty(name) || !TryNormalizeExpected(hash, algorithm, out digest)) { error = "manifest"; return false; }
+                    if (!String.Equals(Basename(name), selected, StringComparison.Ordinal)) continue;
+                    if (matchedName != null && (!String.Equals(name, matchedName, StringComparison.Ordinal) || digest != matchedHash))
+                    { error = "ambiguous"; return false; }
+                    matchedName = name; matchedHash = digest;
+                }
+            }
+            if (selected.Length == 0) { error = "file-required"; return false; }
+            if (matchedHash == null) { error = "file-missing"; return false; }
+            expected = matchedHash; return true;
+        }
+
+        private static string Basename(string path)
+        {
+            // Backslashes are valid filename characters on Unix. Only the
+            // current platform's actual separators may split a selected path.
+            try { return Path.GetFileName(path); }
+            catch (ArgumentException) { return null; }
+        }
+
         public static string ComputeFile(string path, string algorithm, CancellationToken cancellation, IProgress<int> progress = null)
         {
             cancellation.ThrowIfCancellationRequested();

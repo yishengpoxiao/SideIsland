@@ -46,9 +46,48 @@ namespace CodexIsland
                     Check(reader.Read().Lines.Count <= LogWatchReader.MaximumLines, "Long-running tail buffers retain a bounded number of lines");
                 }
                 Check(File.ReadAllText(path).Contains("line 3 599"), "Readers never modify source logs");
+                LiveBoundaryAlerts(path);
             }
             finally { Directory.Delete(directory, true); }
-            Console.WriteLine("PASS: live log Unicode decoding, append offsets, missing/replacement/truncation recovery, keyword throttling and bounded tail tests.");
+            Console.WriteLine("PASS: live log Unicode decoding, append offsets, missing/replacement/truncation recovery, historical partial suppression, first append alerts, logical-line deduplication, keyword throttling and bounded tail tests.");
+        }
+        private static void LiveBoundaryAlerts(string path)
+        {
+            DateTime now = DateTime.UtcNow;
+            File.WriteAllText(path, "historical error", new UTF8Encoding(false));
+            using (var reader = new LogWatchReader(path, () => now))
+            {
+                reader.SetKeywords("error"); Check(reader.Read().Alert == null, "Initial unfinished historical errors do not alert");
+                now = now.AddSeconds(11); Check(reader.Read().Alert == null, "An idle poll cannot alert an unchanged historical partial line");
+                Append(path, " detail\n"); Check(reader.Read().Alert == null, "Finishing a historical matched line does not replay its error");
+                Append(path, "new error"); Check(reader.Read().Alert == "new error", "A new unfinished matching line alerts before its newline");
+                now = now.AddSeconds(11); Append(path, " more detail"); Check(reader.Read().Alert == null, "Extending an already matched line does not repeat its alert after the throttle");
+                Append(path, "\n"); Check(reader.Read().Alert == null, "Completing an already matched line does not repeat its alert");
+                Append(path, "next error\n"); Check(reader.Read().Alert == "next error", "Deduplication ends at the logical line boundary");
+            }
+            File.WriteAllText(path, "historical err", new UTF8Encoding(false));
+            using (var reader = new LogWatchReader(path, () => now))
+            {
+                reader.SetKeywords("error"); reader.Read(); Append(path, "or\n");
+                Check(reader.Read().Alert == "historical error", "A keyword first completed by new bytes still alerts across the live boundary");
+            }
+            foreach (Encoding encoding in new Encoding[] { new UTF8Encoding(false), new UnicodeEncoding(false, true), new UTF32Encoding(true, true) })
+            {
+                File.WriteAllBytes(path, new byte[0]);
+                using (var reader = new LogWatchReader(path, () => now))
+                {
+                    reader.SetKeywords("error"); reader.Read(); File.WriteAllText(path, "first error\n", encoding);
+                    var first = reader.Read(); Check(first.Alert == "first error" && first.Lines.SequenceEqual(new[] { "first error" }), "The first append to an observed empty file detects its encoding and alerts: " + encoding.WebName);
+                }
+            }
+            File.WriteAllText(path, "historical failure", new UTF8Encoding(false));
+            using (var reader = new LogWatchReader(path, () => now))
+            {
+                reader.SetKeywords("error"); reader.Read(); reader.SetKeywords("failure");
+                Check(reader.Read().Alert == null, "Updating keywords does not retroactively alert an existing partial line");
+                Append(path, "\nnew failure\n"); Check(reader.Read().Alert == "new failure", "Updated keywords apply to newly arriving lines only");
+                File.WriteAllText(path, "rotated failure", new UTF8Encoding(false)); Check(reader.Read().Reset && reader.Read().Alert == null, "A truncated historical partial line is not replayed after resetting the decoder");
+            }
         }
         private static void Append(string path, string value) { File.AppendAllText(path, value, new UTF8Encoding(false)); }
         private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }

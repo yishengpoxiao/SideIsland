@@ -31,7 +31,7 @@ namespace CodexIsland
             calculate = IslandWindow.Button("开始计算", async () => await Calculate()); cancel = IslandWindow.Button("取消计算", Cancel); copy = IslandWindow.Button("复制校验值", Copy);
             Children.Add(PanelActionLayout.Create(3, calculate, cancel, copy)); Children.Add(progress);
             output.IsReadOnly = true; output.TextWrapping = TextWrapping.Wrap; output.VerticalContentAlignment = VerticalAlignment.Top; output.MinHeight = 42; output.MaxHeight = 102; output.Margin = new Thickness(0, 6, 0, 0); output.VerticalScrollBarVisibility = ScrollBarVisibility.Auto; Children.Add(output); Children.Add(status);
-            Children.Add(ToolStyle.Hint("粘贴预期校验值（可选，忽略首尾空白和大小写）")); expected.MaxLength = 260; expected.TextWrapping = TextWrapping.Wrap; expected.VerticalContentAlignment = VerticalAlignment.Top; expected.MinHeight = 42; expected.MaxHeight = 102; expected.VerticalScrollBarVisibility = ScrollBarVisibility.Auto; Children.Add(expected); Children.Add(comparison);
+            Children.Add(ToolStyle.Hint("粘贴校验值或 SHA256SUMS / SHA512SUMS 清单，自动匹配所选文件名。")); expected.MaxLength = 0; expected.AcceptsReturn = true; expected.TextWrapping = TextWrapping.Wrap; expected.VerticalContentAlignment = VerticalAlignment.Top; expected.MinHeight = 42; expected.MaxHeight = 102; expected.VerticalScrollBarVisibility = ScrollBarVisibility.Auto; Children.Add(expected); Children.Add(comparison);
             Children.Add(ToolStyle.Hint(demo ? "演示模式 · 仅计算固定文字样本，不读取本机文件或修改剪贴板" : "计算在后台进行，可随时取消。只读取所选文件，不修改文件或上传内容；校验一致仅表示字节一致，不能替代来源判断。"));
             algorithm.SelectionChanged += (s, e) => { InvalidateResult(); UpdateControls(); };
             expected.TextChanged += (s, e) => Compare();
@@ -79,8 +79,17 @@ namespace CodexIsland
         {
             comparison.Foreground = Display.Brush("#8FA89A");
             if (String.IsNullOrWhiteSpace(expected.Text)) { comparison.Text = ""; return; }
-            string normalized;
-            if (!FileHashTools.TryNormalizeExpected(expected.Text, Algorithm, out normalized)) { comparison.Text = Algorithm == "SHA256" ? "SHA-256 需要 64 位十六进制字符。" : "SHA-512 需要 128 位十六进制字符。"; return; }
+            string normalized, error;
+            if (!FileHashTools.TryResolveExpected(expected.Text, Algorithm, demo ? "Side Island demo" : path, out normalized, out error))
+            {
+                comparison.Text = error == "too-large" ? "校验清单最多支持 128 Ki 字符和 1,024 行。" :
+                    error == "file-required" ? "请先选择文件，再匹配校验清单。" :
+                    error == "file-missing" ? "清单中没有与所选文件名完全一致的记录。" :
+                    error == "ambiguous" ? "清单中存在同名文件或冲突校验值，请仅保留目标记录。" :
+                    error == "manifest" ? "清单格式无效，请使用所选算法的 GNU 或 BSD 校验清单。" :
+                    Algorithm == "SHA256" ? "SHA-256 需要 64 位十六进制字符。" : "SHA-512 需要 128 位十六进制字符。";
+                return;
+            }
             if (result == null) { comparison.Text = "格式正确，计算完成后会进行比较。"; return; }
             bool equal = String.Equals(result, normalized, StringComparison.Ordinal); comparison.Text = equal ? "✓ 校验值一致" : "校验值不一致，请检查文件和校验算法。"; comparison.Foreground = Display.Brush(equal ? "#A1EACF" : "#F0B88F");
         }

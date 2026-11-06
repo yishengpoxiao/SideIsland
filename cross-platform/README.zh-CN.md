@@ -52,7 +52,7 @@ pwsh ./build.ps1 -Runtime linux-x64
 pwsh ./build.ps1 -Runtime linux-arm64
 ```
 
-可用 `-Runtime win-x64` 构建跨平台界面的 Windows 验证版；它与原 WPF 产品不是同一个包。`-SkipPackage` 只发布到 `out/<rid>`；也可单独调用：
+可用 `-Runtime win-x64` 构建跨平台界面的 Windows 验证版，文件名为 `SideIsland-Preview-v1.0.0-win-x64.zip`，与原 WPF 产品使用不同名称。`-SkipPackage` 只发布到 `out/<rid>`；也可单独调用：
 
 ```powershell
 pwsh ./package.ps1 -Runtime osx-arm64 -PublishDirectory ./out/osx-arm64
@@ -63,6 +63,8 @@ pwsh ./package.ps1 -Runtime osx-arm64 -PublishDirectory ./out/osx-arm64
 - `SideIsland-v1.0.0-osx-arm64.zip`，包含 `Side Island.app/Contents/MacOS` 下完整的自包含发布文件和 `Info.plist`。
 - `SideIsland-v1.0.0-linux-x64.zip` 或 `SideIsland-v1.0.0-linux-arm64.zip`，包含 `SideIsland/` 及启动脚本 `side-island`。
 - 每包的 `.sha256` 和 `.manifest.json` 记录解压后逐文件 SHA256、Unix 文件模式和构建目标；打包器会自检这些内容。
+
+打包器遇到已有 ZIP、校验文件或清单会停止，避免覆盖。同版本本地产物需先检查并明确归档；新版本则修改 `VERSION` 后重新构建。已发布的发行包应保持不变。
 
 ZIP 明确使用 Unix creator OS，目录和原生程序／动态库为 0755，普通文件为 0644。Ubuntu 解压后可从 `SideIsland/` 运行 `./side-island`；可选把完整目录放到自己的应用目录，并将其中的 `side-island` 脚本链接到用户 PATH 后，再使用 `side-island.desktop`。自包含程序仍依赖桌面系统的基础原生库。
 

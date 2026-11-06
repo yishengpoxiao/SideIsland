@@ -116,7 +116,9 @@ Each command restores and self-contained-publishes into `cross-platform/out/<rid
 pwsh ./cross-platform/package.ps1 -Runtime osx-arm64 -PublishDirectory ./out/osx-arm64
 ```
 
-`-PublishDirectory` is resolved relative to `cross-platform/` when it is not absolute. A `win-x64` runtime is available for preview-shell verification; it is **not** the mature WPF Windows release.
+`-PublishDirectory` is resolved relative to `cross-platform/` when it is not absolute. A `win-x64` runtime is available for preview-shell verification as `SideIsland-Preview-v1.0.0-win-x64.zip`, separate from the mature WPF Windows release.
+
+Both packagers refuse an existing ZIP, checksum or manifest. Review and explicitly archive an earlier local output before repackaging, or change `VERSION` and rebuild for a new release. Preserve already published assets. Run `pwsh ./tools/test-package-output-policy.ps1` to verify collision handling and WPF/preview coexistence with isolated synthetic packaging fixtures; it does not execute a target-platform application or change the real release assets.
 
 Expected user-facing assets:
 

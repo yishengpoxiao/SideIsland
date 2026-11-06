@@ -24,10 +24,10 @@ if (-not $PublishDirectory) { $PublishDirectory = Join-Path $crossRoot ('out/' +
 if (-not [IO.Path]::IsPathRooted($PublishDirectory)) { $PublishDirectory = Join-Path $crossRoot $PublishDirectory }
 $publish = [IO.Path]::GetFullPath($PublishDirectory)
 $releaseRoot = Join-Path $projectRoot 'release'
-$stamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff')
+$stamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 $evidence = Join-Path $projectRoot ('artifacts/cross-platform/packaging/' + $runtimeId + '-' + $stamp)
 $stage = Join-Path $evidence 'stage'
-$archiveName = 'SideIsland-v' + $Version + '-' + $runtimeId + '.zip'
+$archiveName = $(if ($runtimeId -eq 'win-x64') { 'SideIsland-Preview-v' } else { 'SideIsland-v' }) + $Version + '-' + $runtimeId + '.zip'
 $archivePath = Join-Path $releaseRoot $archiveName
 $temporaryArchive = Join-Path $releaseRoot ('.' + $runtimeId + '-' + [Guid]::NewGuid().ToString('N') + '.zip')
 
@@ -38,6 +38,13 @@ function Checked-Path([string]$Path) {
         if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw ('Packaging does not follow links or reparse points: ' + $cursor) }
     }
     return $full
+}
+
+function Assert-ReleaseAvailable {
+    foreach ($target in @($archivePath, ($archivePath + '.sha256'), ($archivePath + '.manifest.json'))) {
+        $null = Checked-Path $target
+        if (Test-Path -LiteralPath $target) { throw ('Release already exists; review it before explicitly replacing it: ' + $target) }
+    }
 }
 
 function Tree-Files([string]$Directory) {
@@ -145,6 +152,9 @@ $null = Checked-Path $publish
 $null = Checked-Path $archivePath
 $null = Checked-Path $temporaryArchive
 $null = Checked-Path $evidence
+# Check all three outputs before creating staging/evidence or reading a publish
+# payload. The Windows preview must never collide with the separate WPF release.
+Assert-ReleaseAvailable
 if (-not (Test-Path -LiteralPath $publish -PathType Container)) { throw ('Publish directory not found: ' + $publish) }
 $apphost = Join-Path $publish $(if ($runtimeId -eq 'win-x64') { 'SideIsland.Desktop.exe' } else { 'SideIsland.Desktop' })
 if (-not (Test-Path -LiteralPath $apphost -PathType Leaf)) { throw 'Publish a self-contained desktop app before packaging.' }
@@ -245,13 +255,19 @@ try {
         }
     }
     finally { $zip.Dispose() }
-    $null = Checked-Path $archivePath
-    Move-Item -LiteralPath $temporaryArchive -Destination $archivePath -Force
-    $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
-    [IO.File]::WriteAllText(($archivePath + '.sha256'), $hash + '  ' + $archiveName + "`n", (New-Object Text.UTF8Encoding($false)))
+    $hash = (Get-FileHash -LiteralPath $temporaryArchive -Algorithm SHA256).Hash
     $manifest = [ordered]@{ Version = $Version; Runtime = $runtimeId; PlatformStatus = 'preview'; Archive = $archiveName; SHA256 = $hash; Verified = $true; UnixCreatorOS = 3; Files = $entries.ToArray(); PublishPayload = $sourceManifest; TargetRuntimeExecuted = $false; AppleDeveloperIdSigned = $false; AppleNotarized = $false; VerifiedUtc = [DateTime]::UtcNow.ToString('o') }
-    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath ($archivePath + '.manifest.json') -Encoding UTF8
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidence 'package-manifest.json') -Encoding UTF8
+    $pendingManifest = Join-Path $evidence 'release.manifest.json'
+    $pendingChecksum = Join-Path $evidence 'release.sha256'
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $pendingManifest -Encoding UTF8
+    [IO.File]::WriteAllText($pendingChecksum, $hash + '  ' + $archiveName + "`n", (New-Object Text.UTF8Encoding($false)))
+    Assert-ReleaseAvailable
+    # File.Move's two-argument overload refuses an existing destination, including
+    # one created after the preflight. No release or sidecar is overwritten.
+    [IO.File]::Move($temporaryArchive, $archivePath)
+    [IO.File]::Move($pendingChecksum, ($archivePath + '.sha256'))
+    [IO.File]::Move($pendingManifest, ($archivePath + '.manifest.json'))
     # The stage is this invocation's generated copy, never the publish directory.
     # Only remove it after both the payload hashes and published archive passed.
     $null = Checked-Path $stage

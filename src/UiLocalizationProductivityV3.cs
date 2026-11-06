@@ -4,6 +4,12 @@ namespace CodexIsland
     {
         private static void ProductivityV3Catalog()
         {
+            Map(@"粘贴校验值或 SHA256SUMS / SHA512SUMS 清单，自动匹配所选文件名。|Paste a checksum or SHA256SUMS / SHA512SUMS list to match the selected filename.
+校验清单最多支持 128 Ki 字符和 1,024 行。|Checksum lists support up to 128 Ki characters and 1,024 lines.
+请先选择文件，再匹配校验清单。|Choose a file before matching a checksum list.
+清单中没有与所选文件名完全一致的记录。|No entry exactly matches the selected filename.
+清单中存在同名文件或冲突校验值，请仅保留目标记录。|Duplicate filenames or conflicting checksums: keep only the intended entry.
+清单格式无效，请使用所选算法的 GNU 或 BSD 校验清单。|Use a valid GNU or BSD checksum list for the selected algorithm.");
             Map(@"▣ 截图提字|▣ Screen text
 截图 OCR / 图片文字识别|Screen OCR / Image text recognition
 ≡ 文本模板|≡ Text templates

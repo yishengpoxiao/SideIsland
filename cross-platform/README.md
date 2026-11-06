@@ -46,7 +46,7 @@ pwsh ./build.ps1 -Runtime linux-x64
 pwsh ./build.ps1 -Runtime linux-arm64
 ```
 
-`-SkipPackage` publishes only to `out/<rid>`. `-Runtime win-x64` builds the portable interface for Windows verification; it is separate from the WPF product. Packaging can also be run after a matching completed publication:
+`-SkipPackage` publishes only to `out/<rid>`. `-Runtime win-x64` builds the portable interface for Windows verification as `SideIsland-Preview-v1.0.0-win-x64.zip`; this distinct filename preserves the WPF product's release. Packaging can also be run after a matching completed publication:
 
 ```powershell
 pwsh ./package.ps1 -Runtime osx-arm64 -PublishDirectory ./out/osx-arm64
@@ -57,6 +57,8 @@ The repository's `release/` directory receives:
 - `SideIsland-v1.0.0-osx-arm64.zip`, containing a self-contained `Side Island.app` bundle.
 - `SideIsland-v1.0.0-linux-x64.zip` or `SideIsland-v1.0.0-linux-arm64.zip`, containing `SideIsland/` and its `side-island` launcher.
 - A `.sha256` and `.manifest.json` beside each ZIP, with payload hashes, Unix modes, runtime, release version and validation scope. Both README languages are included.
+
+Packaging refuses to overwrite an existing ZIP, checksum or manifest. Review and archive an earlier local output explicitly, or change `VERSION` and rebuild for a new release. Already published release assets should remain unchanged.
 
 ZIPs declare a Unix creator OS. Directories/native programs/libraries use 0755; regular data files use 0644. After extraction on Ubuntu, run `./side-island` inside `SideIsland/`. To use the optional desktop entry, first place the complete directory in your chosen app location and expose its launcher on your user PATH. Self-contained .NET packages still depend on basic desktop native libraries.
 
